@@ -679,9 +679,6 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
 
     // Image number
     EncapsulateStringMetaData(*p_clNewTags, "0020|0013", z+1);
-
-    // Derivation description
-    EncapsulateStringMetaData(*p_clNewTags, "0008|2111", std::string("ComputeBValue"));
     
     typename ImageType::IndexType clIndex;
     typename ImageType::PointType clPosition;

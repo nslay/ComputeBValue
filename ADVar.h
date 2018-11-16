@@ -385,6 +385,19 @@ ADVar<RealType, NumIndependents> log(const ADVar<RealType, NumIndependents> &clX
   return clResult;
 }
 
+template<typename RealType, unsigned int NumIndependents>
+ADVar<RealType, NumIndependents> abs_weak(const ADVar<RealType, NumIndependents> &clX) { 
+  return clX.Value() < 0.0 ? -clX : clX; 
+}
+
+template<typename RealType, unsigned int NumIndependents>
+ADVar<RealType, NumIndependents> huber_loss(const ADVar<RealType, NumIndependents> &clX) { 
+  if (std::abs(clX.Value()) <= RealType(1))
+    return RealType(0.5)*(clX * clX);
+
+  return abs_weak(clX) - RealType(0.5);
+}
+
 // Binary functions
 template<typename RealType, unsigned int NumIndependents>
 ADVar<RealType, NumIndependents> pow(const ADVar<RealType, NumIndependents> &clX, int iExp) {

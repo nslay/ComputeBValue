@@ -76,7 +76,7 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-h -- This help message." << std::endl;
   std::cerr << "-k -- Save calculated kurtosis image. The output path will have _Kurtosis appended." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
-  std::cerr << "-p -- Save calculated perfusion fraction image." << std::endl;
+  std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
   exit(1);
 }
 
@@ -244,6 +244,42 @@ private:
   FloatImageType::Pointer m_p_clPerfusionImage;
 };
 
+class DKModel : public BValueModel {
+public:
+  typedef BValueModel SuperType;
+  typedef ADVar<double, 4> ADVarType;
+  typedef itk::Image<float, 3> FloatImageType;
+
+  DKModel()
+  : SuperType(ADVarType::GetNumIndependents()) { }
+
+  virtual ~DKModel() = default;
+
+  virtual bool SaveADC() override { return m_bSaveADC = true; }
+  virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
+  virtual bool SaveKurtosis() override { return m_bSaveKurtosis = true; }
+
+  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
+  std::string GetPerfusionOutputPath() const { return GetOutputPathWithPrefix("_Perfusion"); }
+  std::string GetKurtosisOutputPath() const { return GetOutputPathWithPrefix("_Kurtosis"); }
+
+  virtual bool Run() override;
+
+  // Since we use automatic differentiation, let's do both operations simultaneously...
+  virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
+
+protected:
+  virtual double Solve(const itk::Index<3> &clIndex) override;
+
+private:
+  bool m_bSaveADC = false;
+  bool m_bSavePerfusion = false;
+  bool m_bSaveKurtosis = false;
+  ImageType::Pointer m_p_clADCImage;
+  FloatImageType::Pointer m_p_clPerfusionImage;
+  FloatImageType::Pointer m_p_clKurtosisImage;
+};
+
 int main(int argc, char **argv) {
   const char * const p_cArg0 = argv[0];
 
@@ -298,6 +334,9 @@ int main(int argc, char **argv) {
   }
   else if (strModel == "ivim") {
     p_clModel = std::make_unique<IVIMModel>();
+  }
+  else if (strModel == "dk") {
+    p_clModel = std::make_unique<DKModel>();
   }
   else {
     std::cerr << "Error: Unknown model type '" << strModel << "'.\n" << std::endl;
@@ -704,6 +743,9 @@ bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage
   EncapsulateStringMetaData(clDicomTags, "0020|0011", iSeriesNumber);
   EncapsulateStringMetaData(clDicomTags, "0018|103e", strSeriesDescription);
 
+  // Derivation description
+  EncapsulateStringMetaData(clDicomTags, "0008|2111", std::string("ComputeBValue"));
+
   p_clImage->SetMetaDataDictionary(clDicomTags);
 
   std::string strSeriesUID;
@@ -784,7 +826,7 @@ bool BValueModel::Run() {
   std::cout << "Info: Saving b-value image to '" << GetOutputPath() << "' ..." << std::endl;
 
   std::stringstream descStream;
-  descStream << "Calculated b-" << GetTargetBValue() << " image" << std::endl;
+  descStream << "Calculated b-" << GetTargetBValue() << std::endl;
 
   if (!SaveImage<ImageType::PixelType>(p_clBNImage, GetOutputPath(), 13701, descStream.str())) {
     std::cerr << "Error: Failed to save b-value image." << std::endl;
@@ -855,7 +897,7 @@ double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
 
   if (m_p_clADCImage.IsNotNull())
-    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(1e6*clX[0] + 0.5));
+    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(std::min(4095.0, 1e6*clX[0] + 0.5)));
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
@@ -945,10 +987,124 @@ double IVIMModel::Solve(const itk::Index<3> &clIndex) {
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
 
   if (m_p_clADCImage.IsNotNull())
-    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(1e6*clX[0] + 0.5));
+    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(std::min(4095.0, 1e6*clX[0] + 0.5)));
 
   if (m_p_clPerfusionImage.IsNotNull())
     m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
+
+  const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
+
+  return (double)b0 * std::exp(clX[1]);
+}
+
+///////////////////////////////////////////////////////////////////////
+// DKModel functions
+///////////////////////////////////////////////////////////////////////
+
+bool DKModel::Run() {
+  if (!Good())
+    return false;
+
+  if (MinBValue() != 0.0) {
+    std::cerr << "Error: DK model needs B0 image." << std::endl;
+    return false;
+  }
+
+  SolverType &clSolver = GetSolver();
+
+  vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
+  clBoundSelection[0] = 1; // ADC cannot be negative
+  clBoundSelection[2] = 3; // Log perfusion fraction cannot be positive
+  clBoundSelection[3] = 1; // Kurtosis cannot be negative
+
+  vnl_vector<double> clLowerBound(clBoundSelection.size(), 0.0); // By default, lower bound is 0.0 (if applicable)
+  vnl_vector<double> clUpperBound(clBoundSelection.size(), 0.0); // By default, upper bound is 0.0 (if applicable)
+
+  clSolver.set_bound_selection(clBoundSelection);
+  clSolver.set_lower_bound(clLowerBound);
+  clSolver.set_upper_bound(clUpperBound);
+
+  if (m_bSaveADC)
+    m_p_clADCImage = NewImage<ImageType::PixelType>();
+
+  if (m_bSavePerfusion)
+    m_p_clPerfusionImage = NewImage<FloatImageType::PixelType>();
+
+  if (m_bSaveKurtosis)
+    m_p_clKurtosisImage = NewImage<FloatImageType::PixelType>();
+
+  if (!SuperType::Run())
+    return false;
+
+  if (m_p_clADCImage.IsNotNull()) {
+    std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
+      std::cerr << "Error: Failed to save ADC image." << std::endl;
+      return false;
+    }
+  }
+
+  if (m_p_clPerfusionImage.IsNotNull()) {
+    std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), 13703, "Calculated Perfusion Fraction")) {
+      std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
+      return false;
+    }
+  }
+
+  if (m_p_clKurtosisImage.IsNotNull()) {
+    std::cout << "Info: Saving kurtosis image to '" << GetKurtosisOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clKurtosisImage, GetKurtosisOutputPath(), 13704, "Calculated Kurtosis")) {
+      std::cerr << "Error: Failed to save kurtosis image." << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
+  ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLogF(clX[2], 2), clK(clX[3], 3), clLoss(0.0);
+
+  for (auto &stPair : GetLogIntensities()) {      
+    ADVarType clBD = stPair.first * clD;
+    clLoss += pow(clLogF - clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
+  }
+
+  ADVarType clBD = GetTargetBValue() * clD;
+  clLoss += pow(clLogF - clBD - clLogS + clK * clBD * clBD / 6.0, 2);
+
+  clLoss += huber_loss(clK); // Penalty term on Kurtosis
+
+  if (p_dF != nullptr)
+    *p_dF = clLoss.Value();
+
+  if (p_clG != nullptr) {
+    p_clG->set_size(clX.size());
+    p_clG->copy_in(clLoss.Gradient().data());
+  }
+}
+
+double DKModel::Solve(const itk::Index<3> &clIndex) {
+  vnl_vector<double> clX(ADVarType::GetNumIndependents(), 1.0);
+
+  clX[2] = -1.0; // Log perfusion fraction
+  clX[3] = 1.0;
+
+  if (!GetSolver().minimize(clX))
+    std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
+
+  if (m_p_clADCImage.IsNotNull())
+    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(std::min(4095.0, 1e6*clX[0] + 0.5)));
+
+  if (m_p_clPerfusionImage.IsNotNull())
+    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
+
+  if (m_p_clKurtosisImage.IsNotNull())
+    m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3] < 3.0 ? clX[3] : 0.0));
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
