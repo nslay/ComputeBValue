@@ -1104,7 +1104,7 @@ double DKModel::Solve(const itk::Index<3> &clIndex) {
     m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
 
   if (m_p_clKurtosisImage.IsNotNull())
-    m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3] < 3.0 ? clX[3] : 0.0));
+    m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3] < 15.0 ? clX[3] : 0.0));
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
