@@ -288,7 +288,7 @@ private:
   GradientType m_gradient;
 };
 
-// Other varients of operators
+// Other variants of operators
 
 template<typename RealType, unsigned int NumIndependents>
 ADVar<RealType, NumIndependents> operator+(const RealType &a, const ADVar<RealType, NumIndependents> &clB) { return clB + a; }

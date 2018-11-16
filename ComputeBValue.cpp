@@ -43,6 +43,7 @@
 
 #include <cstdlib>
 #include <cctype>
+#include <memory>
 #include <iostream>
 #include <map>
 #include <unordered_map>
@@ -75,7 +76,7 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-h -- This help message." << std::endl;
   std::cerr << "-k -- Save calculated kurtosis image. The output path will have _Kurtosis appended." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
-  std::cerr << "-p -- Save calculated perfusion image." << std::endl;
+  std::cerr << "-p -- Save calculated perfusion fraction image." << std::endl;
   exit(1);
 }
 
@@ -90,7 +91,7 @@ bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<Real
 double GetDiffusionBValue(const itk::MetaDataDictionary &clDicomTags);
 double GetDiffusionBValueSiemens(const itk::MetaDataDictionary &clDicomTags);
 double GetDiffusionBValueGE(const itk::MetaDataDictionary &clDicomTags);
-double GetDiffusionBValueProstateX(const itk::MetaDataDictionary &clDicomTags); // Same as Skyra and Verio
+double GetDiffusionBValueProstateX(const itk::MetaDataDictionary &clDicomTags); // Same as Skyra and Verio (and many others I can't remember)
 double GetDiffusionBValuePhilips(const itk::MetaDataDictionary &clDicomTags);
 
 std::map<double, std::vector<std::string>> ComputeBValueFileNames(const std::string &strPath, const std::string &strSeriesUID = std::string());
@@ -102,8 +103,7 @@ class BValueModel : public vnl_cost_function {
 public:
   typedef itk::Image<short, 3> ImageType;
   typedef std::map<double, ImageType::Pointer> ImageMapType;
-
-  using vnl_cost_function::vnl_cost_function;
+  typedef vnl_lbfgsb SolverType;
 
   virtual ~BValueModel() = default;
 
@@ -111,13 +111,13 @@ public:
     if (GetOutputPath().empty() || GetTargetBValue() < 0.0 || m_mImagesByBValue.size() < 2)
       return false;
 
-    auto itr = m_mImagesByBValue.begin();
+    auto itr = GetImages().begin();
     auto prevItr = itr++;
 
     if (prevItr->first < 0.0 || !prevItr->second)
       return false;
 
-    while (itr != m_mImagesByBValue.end()) {
+    while (itr != GetImages().end()) {
       if (!itr->second || itr->second->GetBufferedRegion() != prevItr->second->GetBufferedRegion())
         return false;
 
@@ -155,38 +155,97 @@ public:
   void SetTargetBValue(double dTargetBValue) { m_dTargetBValue = dTargetBValue; }
   double GetTargetBValue() const { return m_dTargetBValue; }
 
-  virtual bool Run() = 0;
+  virtual bool Run();
+
+  const ImageMapType & GetImages() const { return m_mImagesByBValue; }
 
 protected:
-  ImageMapType m_mImagesByBValue;
+  BValueModel(int iNumberOfUnknowns)
+  : vnl_cost_function(iNumberOfUnknowns), m_clSolver(*this) { }
+
+  template<typename PixelType>
+  typename itk::Image<PixelType, 3>::Pointer NewImage() const;
+
+  virtual double Solve(const itk::Index<3> &clIndex) = 0; // Return b-value or negative value for failure
+
+  virtual bool SetLogIntensities(const itk::Index<3> &clIndex);
+
+  double MinBValue() const {
+    if (GetImages().empty())
+      return -1.0;
+
+    return GetImages().begin()->first;
+  }
+
+  const std::vector<std::pair<double, double>> & GetLogIntensities() const { return m_vBValueAndLogIntensity; }
+
+  SolverType & GetSolver() { return m_clSolver; }
 
 private:
+  SolverType m_clSolver;
+  ImageMapType m_mImagesByBValue;
   std::string m_strOutputPath;
   double m_dTargetBValue = -1.0;
+  std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
 };
 
-class MonoExponential : public BValueModel {
+class MonoExponentialModel : public BValueModel {
 public:
+  typedef BValueModel SuperType;
   typedef ADVar<double, 2> ADVarType;
 
-  MonoExponential()
-  : BValueModel(ADVarType::GetNumIndependents()) { }
+  MonoExponentialModel()
+  : SuperType(ADVarType::GetNumIndependents()) { }
 
-  virtual ~MonoExponential() = default;
+  virtual ~MonoExponentialModel() = default;
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
 
-  virtual bool Run();
+  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
+
+  virtual bool Run() override;
 
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
+protected:
+  virtual double Solve(const itk::Index<3> &clIndex) override;
+
 private:
   bool m_bSaveADC = false;
-  std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
-  double m_dShift = 0.0; // In case B0 isn't available
+  ImageType::Pointer m_p_clADCImage;
+};
 
-  bool SetLogIntensities(const itk::Index<3> &clIndex);
+class IVIMModel : public BValueModel {
+public:
+  typedef BValueModel SuperType;
+  typedef ADVar<double, 3> ADVarType;
+  typedef itk::Image<float, 3> FloatImageType;
+
+  IVIMModel()
+  : SuperType(ADVarType::GetNumIndependents()) { }
+
+  virtual ~IVIMModel() = default;
+
+  virtual bool SaveADC() override { return m_bSaveADC = true; }
+  virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
+
+  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
+  std::string GetPerfusionOutputPath() const { return GetOutputPathWithPrefix("_Perfusion"); }
+
+  virtual bool Run() override;
+
+  // Since we use automatic differentiation, let's do both operations simultaneously...
+  virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
+
+protected:
+  virtual double Solve(const itk::Index<3> &clIndex) override;
+
+private:
+  bool m_bSaveADC = false;
+  bool m_bSavePerfusion = false;
+  ImageType::Pointer m_p_clADCImage;
+  FloatImageType::Pointer m_p_clPerfusionImage;
 };
 
 int main(int argc, char **argv) {
@@ -236,6 +295,18 @@ int main(int argc, char **argv) {
     Usage(p_cArg0);
 
   std::string strModel = argv[0];
+  std::unique_ptr<BValueModel> p_clModel;
+
+  if (strModel == "mono") {
+    p_clModel = std::make_unique<MonoExponentialModel>();
+  }
+  else if (strModel == "ivim") {
+    p_clModel = std::make_unique<IVIMModel>();
+  }
+  else {
+    std::cerr << "Error: Unknown model type '" << strModel << "'.\n" << std::endl;
+    Usage(p_cArg0);
+  }
 
   typedef itk::Image<short, 3> ImageType;
 
@@ -255,18 +326,27 @@ int main(int argc, char **argv) {
     }
   }
 
+  p_clModel->SetTargetBValue(dBValue);
+  p_clModel->SetImages(mImagesByBValue);
+  p_clModel->SetOutputPath(strOutputPath);
+
+  if (bSaveADC && !p_clModel->SaveADC())
+    std::cerr << "Warning: '" << strModel << "' model does not support saving ADC images." << std::endl;
+
+  if (bSavePerfusion && !p_clModel->SavePerfusion())
+    std::cerr << "Warning: '" << strModel << "' model does not support saving perfusion fraction images." << std::endl;
+
+  if (bSaveKurtosis && !p_clModel->SaveKurtosis())
+    std::cerr << "Warning: '" << strModel << "' model does not support saving kurtosis images." << std::endl;
+
   std::cout << "Info: Calculating b-" << dBValue << std::endl;
 
-  MonoExponential clModel;
+  if (!p_clModel->Run()) {
+    std::cerr << "Error: Failed to compute b-value image." << std::endl;
+    return -1;
+  }
 
-  clModel.SetTargetBValue(dBValue);
-  clModel.SetImages(mImagesByBValue);
-  clModel.SetOutputPath(strOutputPath);
-
-  if (bSaveADC)
-    clModel.SaveADC();
-
-  return clModel.Run() ? 0 : -1;
+  return 0;
 }
 
 template<typename RealType>
@@ -522,8 +602,6 @@ std::map<double, std::vector<std::string>> ComputeBValueFileNames(const std::str
   // These should be ordered by Z coordinate (they're not)
   const FileNameGeneratorType::FileNamesContainerType &vDicomFiles = p_clFileNameGenerator->GetFileNames(strSeriesUID);
 
-  // TODO: Re-order these properly
-
   if (vDicomFiles.empty())
     return MapType();
 
@@ -627,123 +705,49 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
   return mImagesByBValue;
 }
 
-// MonoExponential functions
-bool MonoExponential::Run() {
-  if (!Good())
-    return false;
+///////////////////////////////////////////////////////////////////////
+// BValueModel funcrions
+///////////////////////////////////////////////////////////////////////
 
-  vnl_lbfgsb clSolver(*this);
+template<typename PixelType>
+typename itk::Image<PixelType, 3>::Pointer BValueModel::NewImage() const {
+  typedef itk::Image<PixelType, 3> OtherImageType;
 
-  vnl_vector<long> clBoundSelection(2, 0); // By default, not constrained
-  clBoundSelection[0] = 1; // ADC cannot be negative
+  if (m_mImagesByBValue.empty() || !m_mImagesByBValue.begin()->second)
+    return OtherImageType::Pointer();
 
-  vnl_vector<double> clLowerBound(2, 0.0); // By default, lower bound is 0.0
- 
-  clSolver.set_bound_selection(clBoundSelection);
-  clSolver.set_lower_bound(clLowerBound);
+  ImageType::Pointer p_clRefImage = m_mImagesByBValue.begin()->second;
 
-  //clSolver.set_verbose(true);
+  OtherImageType::Pointer p_clImage = OtherImageType::New();
+  p_clImage->SetRegions(p_clRefImage->GetBufferedRegion());
+  p_clImage->SetSpacing(p_clRefImage->GetSpacing());
+  p_clImage->SetOrigin(p_clRefImage->GetOrigin());
+  p_clImage->SetDirection(p_clRefImage->GetDirection());
 
-  const itk::Size<3> clSize = m_mImagesByBValue.begin()->second->GetBufferedRegion().GetSize();
+  p_clImage->Allocate();
+  p_clImage->FillBuffer(OtherImageType::PixelType());    
 
-  m_vBValueAndLogIntensity.reserve(m_mImagesByBValue.size());
-
-  ImageType::Pointer p_clB0Image = m_mImagesByBValue.begin()->second;
-  ImageType::Pointer p_clADCImage;
-  ImageType::Pointer p_clBNImage = ImageType::New();
-
-  p_clBNImage->SetSpacing(p_clB0Image->GetSpacing());
-  p_clBNImage->SetOrigin(p_clB0Image->GetOrigin());
-  p_clBNImage->SetDirection(p_clB0Image->GetDirection());
-  p_clBNImage->SetRegions(p_clB0Image->GetBufferedRegion());
-
-  p_clBNImage->Allocate();
-  p_clBNImage->FillBuffer(0);
-
-  if (m_bSaveADC) {
-    p_clADCImage = ImageType::New();
-    p_clADCImage->SetSpacing(p_clB0Image->GetSpacing());
-    p_clADCImage->SetOrigin(p_clB0Image->GetOrigin());
-    p_clADCImage->SetDirection(p_clB0Image->GetDirection());
-    p_clADCImage->SetRegions(p_clB0Image->GetBufferedRegion());
-    p_clADCImage->Allocate();
-    p_clADCImage->FillBuffer(0);
-  }
-
-  vnl_vector<double> clX(2);
-
-  for (itk::IndexValueType z = 0; z < clSize[2]; ++z) {
-    for (itk::IndexValueType y = 0; y < clSize[1]; ++y) {
-      for (itk::IndexValueType x = 0; x < clSize[0]; ++x) {
-        const itk::Index<3> clIndex = {{ x, y, z }};
-
-        if (!SetLogIntensities(clIndex))
-          continue;
-
-        clX.fill(1.0);
-        if (!clSolver.minimize(clX)) {
-          std::cerr << "Error: Solver failed." << std::endl;
-        }
-
-        const ImageType::PixelType &b0 = p_clB0Image->GetPixel(clIndex);
-
-        const double dBN = std::min(4095.0, (double)b0 * std::exp(clX[1]));
-
-        p_clBNImage->SetPixel(clIndex, ImageType::PixelType(dBN + 0.5));
-
-        if (p_clADCImage.IsNotNull())
-          p_clADCImage->SetPixel(clIndex, ImageType::PixelType(1e6*clX[0] + 0.5));
-      }
-    }
-  }
-
-  if (!SaveImg<ImageType::PixelType, 3>(p_clBNImage, GetOutputPath())) {
-    std::cerr << "Error: Failed to save B value image to '" << GetOutputPath() << "'." << std::endl;
-    return false;
-  }
-
-  if (p_clADCImage.IsNotNull() && !SaveImg<ImageType::PixelType, 3>(p_clADCImage, GetOutputPathWithPrefix("_ADC"))) {
-    std::cerr << "Error: Failed to save ADC value image to '" << GetOutputPathWithPrefix("_ADC") << "'." << std::endl;
-    return false;
-  }
-
-  return true;
+  return p_clImage;
 }
 
-void MonoExponential::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
-  ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLoss(0.0);
+bool BValueModel::SetLogIntensities(const itk::Index<3> &clIndex) {
+  auto itr = GetImages().begin();
 
-  for (auto &stPair : m_vBValueAndLogIntensity) {      
-    clLoss += pow(-stPair.first * clD - stPair.second, 2);
-  }
+  const ImageType::PixelType &b0 = itr->second->GetPixel(clIndex); // OK, not B0 necessarily...
 
-  clLoss += pow(-(GetTargetBValue() - m_dShift) * clD - clLogS, 2);
+  if (b0 < 0) // Should NEVER happen
+    return false;
 
-  if (p_dF != nullptr)
-    *p_dF = clLoss.Value();
-
-  if (p_clG != nullptr) {
-    p_clG->set_size(clX.size());
-    p_clG->copy_in(clLoss.Gradient().data());
-  }
-}
-
-bool MonoExponential::SetLogIntensities(const itk::Index<3> &clIndex) {
-  auto itr = m_mImagesByBValue.begin();
-  auto begin = itr++;
-
-  m_dShift = begin->first;
+  ++itr;
 
   m_vBValueAndLogIntensity.clear();
-  m_vBValueAndLogIntensity.reserve(m_mImagesByBValue.size());
-
-  const ImageType::PixelType b0 = begin->second->GetPixel(clIndex); // OK, not B0 necessarily...
+  m_vBValueAndLogIntensity.reserve(GetImages().size());
 
   while (itr != m_mImagesByBValue.end()) {
 
     const ImageType::PixelType &bN = itr->second->GetPixel(clIndex);
 
-    if (b0 < 0 || bN < 0) // Should NEVER happen
+    if (bN < 0) // Should NEVER happen
       return false;
 
     double dLogValue = 0.0;
@@ -757,10 +761,207 @@ bool MonoExponential::SetLogIntensities(const itk::Index<3> &clIndex) {
     else
       dLogValue = std::log((double)bN / (double)b0);
 
-    m_vBValueAndLogIntensity.emplace_back(itr->first - m_dShift, dLogValue);
+    m_vBValueAndLogIntensity.emplace_back(itr->first - MinBValue(), dLogValue);
 
     ++itr;
   }
 
   return true;
+}
+
+bool BValueModel::Run() {
+  if (!Good())
+    return false;
+
+  //clSolver.set_verbose(true);
+
+  const itk::Size<3> clSize = m_mImagesByBValue.begin()->second->GetBufferedRegion().GetSize();
+
+  m_vBValueAndLogIntensity.reserve(m_mImagesByBValue.size());
+
+  ImageType::Pointer p_clBNImage = NewImage<ImageType::PixelType>();
+
+  for (itk::IndexValueType z = 0; z < clSize[2]; ++z) {
+    for (itk::IndexValueType y = 0; y < clSize[1]; ++y) {
+      for (itk::IndexValueType x = 0; x < clSize[0]; ++x) {
+        const itk::Index<3> clIndex = {{ x, y, z }};
+
+        if (!SetLogIntensities(clIndex))
+          continue;
+
+        const double dBN = std::min(4095.0, std::max(0.0, Solve(clIndex)));
+
+        p_clBNImage->SetPixel(clIndex, ImageType::PixelType(dBN + 0.5));
+      }
+    }
+  }
+
+  std::cout << "Info: Saving b-value image to '" << GetOutputPath() << "' ..." << std::endl;
+  if (!SaveImg<ImageType::PixelType, 3>(p_clBNImage, GetOutputPath())) {
+    std::cerr << "Error: Failed to save b-value image." << std::endl;
+    return false;
+  }
+
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////
+// MonoExponentialModel functions
+///////////////////////////////////////////////////////////////////////
+
+bool MonoExponentialModel::Run() {
+  if (!Good())
+    return false;
+
+  SolverType &clSolver = GetSolver();
+
+  vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
+  clBoundSelection[0] = 1; // ADC cannot be negative
+
+  vnl_vector<double> clLowerBound(clBoundSelection.size(), 0.0); // By default, lower bound is 0.0
+ 
+  clSolver.set_bound_selection(clBoundSelection);
+  clSolver.set_lower_bound(clLowerBound);
+
+  if (m_bSaveADC)
+    m_p_clADCImage = NewImage<ImageType::PixelType>();
+
+  if (!SuperType::Run())
+    return false;
+
+  if (m_p_clADCImage.IsNotNull()) {
+    std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImg<ImageType::PixelType, 3>(m_p_clADCImage, GetADCOutputPath())) {
+      std::cerr << "Error: Failed to save ADC image." << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void MonoExponentialModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
+  ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLoss(0.0);
+
+  for (auto &stPair : GetLogIntensities()) {      
+    clLoss += pow(-stPair.first * clD - stPair.second, 2);
+  }
+
+  clLoss += pow(-(GetTargetBValue() - MinBValue()) * clD - clLogS, 2);
+
+  if (p_dF != nullptr)
+    *p_dF = clLoss.Value();
+
+  if (p_clG != nullptr) {
+    p_clG->set_size(clX.size());
+    p_clG->copy_in(clLoss.Gradient().data());
+  }
+}
+
+double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
+  vnl_vector<double> clX(ADVarType::GetNumIndependents(), 1.0);
+
+  if (!GetSolver().minimize(clX))
+    std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
+
+  if (m_p_clADCImage.IsNotNull())
+    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(1e6*clX[0] + 0.5));
+
+  const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
+
+  return (double)b0 * std::exp(clX[1]);
+}
+
+///////////////////////////////////////////////////////////////////////
+// IVIMModel functions
+///////////////////////////////////////////////////////////////////////
+
+bool IVIMModel::Run() {
+  if (!Good())
+    return false;
+
+  if (MinBValue() != 0.0) {
+    std::cerr << "Error: IVIM model needs B0 image." << std::endl;
+    return false;
+  }
+
+  SolverType &clSolver = GetSolver();
+
+  vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
+  clBoundSelection[0] = 1; // ADC cannot be negative
+  clBoundSelection[2] = 3; // Log perfusion fraction cannot be positive
+
+  vnl_vector<double> clLowerBound(clBoundSelection.size(), 0.0); // By default, lower bound is 0.0 (if applicable)
+  vnl_vector<double> clUpperBound(clBoundSelection.size(), 0.0); // By default, upper bound is 0.0 (if applicable)
+ 
+  clSolver.set_bound_selection(clBoundSelection);
+  clSolver.set_lower_bound(clLowerBound);
+  clSolver.set_upper_bound(clUpperBound);
+
+  if (m_bSaveADC)
+    m_p_clADCImage = NewImage<ImageType::PixelType>();
+
+  if (m_bSavePerfusion)
+    m_p_clPerfusionImage = NewImage<FloatImageType::PixelType>();
+
+  if (!SuperType::Run())
+    return false;
+
+  if (m_p_clADCImage.IsNotNull()) {
+    std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImg<ImageType::PixelType, 3>(m_p_clADCImage, GetADCOutputPath())) {
+      std::cerr << "Error: Failed to save ADC value image." << std::endl;
+      return false;
+    }
+  }
+
+  if (m_p_clPerfusionImage.IsNotNull()) {
+    std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
+
+    if (!SaveImg<FloatImageType::PixelType, 3>(m_p_clPerfusionImage, GetPerfusionOutputPath())) {
+      std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void IVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
+  ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLogF(clX[2], 2), clLoss(0.0);
+
+  for (auto &stPair : GetLogIntensities()) {      
+    clLoss += pow(clLogF - stPair.first * clD - stPair.second, 2);
+  }
+
+  clLoss += pow(clLogF - GetTargetBValue() * clD - clLogS, 2);
+
+  if (p_dF != nullptr)
+    *p_dF = clLoss.Value();
+
+  if (p_clG != nullptr) {
+    p_clG->set_size(clX.size());
+    p_clG->copy_in(clLoss.Gradient().data());
+  }
+}
+
+double IVIMModel::Solve(const itk::Index<3> &clIndex) {
+  vnl_vector<double> clX(ADVarType::GetNumIndependents(), 1.0);
+
+  clX[2] = -1.0; // Log perfusion fraction
+
+  if (!GetSolver().minimize(clX))
+    std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
+
+  if (m_p_clADCImage.IsNotNull())
+    m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(1e6*clX[0] + 0.5));
+
+  if (m_p_clPerfusionImage.IsNotNull())
+    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
+
+  const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
+
+  return (double)b0 * std::exp(clX[1]);
 }
