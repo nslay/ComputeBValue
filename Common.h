@@ -51,19 +51,24 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <type_traits>
 
 #include "itkImage.h"
 #include "itkGDCMImageIO.h"
 #include "itkGDCMSeriesFileNames.h"
+#include "itkNumericSeriesFileNames.h"
 #include "itkImageSeriesReader.h"
+#include "itkImageSeriesWriter.h"
 #include "itkImageFileReader.h"
 #include "itkImageFileWriter.h"
 
 #include "vnl/vnl_vector_fixed.h"
+#include "vnl/vnl_matrix_fixed.h"
 #include "vnl/vnl_cross.h"
 
 #include "gdcmCSAHeader.h"
 #include "gdcmCSAElement.h"
+#include "gdcmUIDGenerator.h"
 
 void Trim(std::string &strString);
 
@@ -80,6 +85,8 @@ template<>
 std::vector<std::string> SplitString<std::string>(const std::string &strValue, const std::string &strDelim);
 
 bool ParseITKTag(const std::string &strKey, uint16_t &ui16Group, uint16_t &ui16Element);
+
+void CopyStringMetaData(itk::MetaDataDictionary &clNew, const itk::MetaDataDictionary &clOriginal);
 
 bool FileExists(const std::string &strPath);
 bool IsFolder(const std::string &strPath);
@@ -114,10 +121,41 @@ template<>
 bool ExposeStringMetaData<gdcm::CSAHeader>(const itk::MetaDataDictionary &clTags, const std::string &strKey, gdcm::CSAHeader &clCSAHeader);
 
 template<typename ValueType>
+void EncapsulateStringMetaData(itk::MetaDataDictionary &clTags, const std::string &strKey, const ValueType &value);
+
+template<>
+void EncapsulateStringMetaData<std::string>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::string &strValue);
+
+template<>
+void EncapsulateStringMetaData<std::vector<float>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::vector<float> &vValues);
+
+template<>
+void EncapsulateStringMetaData<std::vector<double>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::vector<double> &vValues);
+
+template<>
+void EncapsulateStringMetaData<itk::Point<float, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<float, 3> &clPoint);
+
+template<>
+void EncapsulateStringMetaData<itk::Point<float, 2>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<float, 2> &clPoint);
+
+template<>
+void EncapsulateStringMetaData<itk::Point<double, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<double, 3> &clPoint);
+
+template<>
+void EncapsulateStringMetaData<itk::Point<double, 2>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<double, 2> &clPoint);
+
+template<typename ValueType>
 bool ExposeCSAMetaData(gdcm::CSAHeader &clHeader, const std::string &strKey, ValueType &value);
 
 template<>
 bool ExposeCSAMetaData<std::string>(gdcm::CSAHeader &clHeader, const std::string &strKey, std::string &strValue);
+
+// Needed for sorting the B value dictionaries and writing DICOM
+template<typename RealType>
+bool GetOrientationMatrix(const itk::MetaDataDictionary &clDicomTags, vnl_matrix_fixed<RealType, 3, 3> &clOrientation);
+
+template<typename RealType>
+bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<RealType, 3> &clOrigin);
 
 void SanitizeFileName(std::string &strFileName); // Does NOT operate on paths
 void FindFiles(const char *p_cDir, const char *p_cPattern, std::vector<std::string> &vFiles, bool bRecursive = false);
@@ -141,6 +179,11 @@ bool SaveDicomSlice(typename itk::Image<PixelType, 2>::Pointer p_clImage, const 
 
 template<typename PixelType, unsigned int Dimension>
 typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::string &strPath, const std::string &strSeriesUID = std::string());
+
+// The p_clImage must have a template MetaDataDictionary from a valid DICOM already set!
+// NOTE: You are responsible for setting the series number 0020|0011 and series description 0008|103e as well as any other custom tags!
+template<typename PixelType, unsigned int Dimension>
+bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress = false);
 
 template<typename ValueType>
 ValueType FromString(const std::string &strValue, const ValueType &failValue) {
@@ -204,6 +247,18 @@ inline bool ExposeStringMetaData<std::string>(const itk::MetaDataDictionary &clT
 }
 
 template<typename ValueType>
+void EncapsulateStringMetaData(itk::MetaDataDictionary &clTags, const std::string &strKey, const ValueType &value) {
+  std::stringstream valueStream;
+  valueStream << value;
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+inline void EncapsulateStringMetaData<std::string>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::string &strValue) {
+  return itk::EncapsulateMetaData(clTags, strKey, strValue);
+}
+
+template<typename ValueType>
 bool ExposeCSAMetaData(gdcm::CSAHeader &clHeader, const std::string &strKey, ValueType &value) {
   if (!clHeader.FindCSAElementByName(strKey.c_str()))
     return false;
@@ -215,6 +270,46 @@ bool ExposeCSAMetaData(gdcm::CSAHeader &clHeader, const std::string &strKey, Val
     return false;
 
   return p_clByteValue->GetBuffer((char *)&value, sizeof(ValueType));
+}
+
+template<typename RealType>
+bool GetOrientationMatrix(const itk::MetaDataDictionary &clDicomTags, vnl_matrix_fixed<RealType, 3, 3> &clOrientation) {
+  std::vector<RealType> vImageOrientationPatient; // 0020|0037
+
+  if (!ExposeStringMetaData(clDicomTags, "0020|0037", vImageOrientationPatient) || vImageOrientationPatient.size() != 6)
+    return false;
+
+  vnl_vector_fixed<RealType, 3> clX, clY, clZ;
+
+  clX.copy_in(vImageOrientationPatient.data());
+  clY.copy_in(vImageOrientationPatient.data() + 3);
+  clZ = vnl_cross_3d(clX, clY);
+
+  clOrientation[0][0] = clX[0];
+  clOrientation[1][0] = clX[1];
+  clOrientation[2][0] = clX[2];
+
+  clOrientation[0][1] = clY[0];
+  clOrientation[1][1] = clY[1];
+  clOrientation[2][1] = clY[2];
+
+  clOrientation[0][2] = clZ[0];
+  clOrientation[1][2] = clZ[1];
+  clOrientation[2][2] = clZ[2];
+
+  return true;
+}
+
+template<typename RealType>
+bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<RealType, 3> &clOrigin) {
+  std::vector<RealType> vImagePositionPatient; // 0020|0032
+
+  if (!ExposeStringMetaData(clDicomTags, "0020|0032", vImagePositionPatient) || vImagePositionPatient.size() != clOrigin.size())
+    return false;
+
+  clOrigin.copy_in(vImagePositionPatient.data());
+
+  return true;
 }
 
 template<typename PixelType, unsigned int Dimension>
@@ -295,7 +390,7 @@ typename itk::Image<PixelType, 3>::Pointer PromoteSlice(typename itk::Image<Pixe
   
   itk::MetaDataDictionary clDicomTags = p_clSlice->GetMetaDataDictionary();
 
-  const float fSpacingBetweenSlices = 0.0f; // 0018|0088
+  float fSpacingBetweenSlices = 0.0f; // 0018|0088
 
   if (!ExposeStringMetaData(clDicomTags, "0018|0088", fSpacingBetweenSlices))
     return typename ImageType3D::Pointer(); // Not a DICOM, at least not one with Spacing Between Slices tag
@@ -321,41 +416,35 @@ typename itk::Image<PixelType, 3>::Pointer PromoteSlice(typename itk::Image<Pixe
   p_clSlice3D->SetSpacing(clSpacing3D);
   
   // Now pull out all the other 3D tags
-  std::vector<float> vImagePositionPatient; // 0020|0032
-  std::vector<float> vImageOrientationPatient; // 0020|0037
+  vnl_vector_fixed<float, 3> clVnlOrigin3D;
 
-  if (!ExposeStringMetaData(clDicomTags, "0020|0032", vImagePositionPatient) || vImagePositionPatient.size() != 3)
+  if (!GetOrigin(clDicomTags, clVnlOrigin3D))
     return p_clSlice3D; // Uhh?
   
-  clOrigin3D[0] = vImagePositionPatient[0];
-  clOrigin3D[1] = vImagePositionPatient[1];
-  clOrigin3D[2] = vImagePositionPatient[2];
+  clOrigin3D[0] = clVnlOrigin3D[0];
+  clOrigin3D[1] = clVnlOrigin3D[1];
+  clOrigin3D[2] = clVnlOrigin3D[2];
   
   p_clSlice3D->SetOrigin(clOrigin3D);
-  
-  if (!ExposeStringMetaData(clDicomTags, "0020|0037", vImageOrientationPatient) || vImageOrientationPatient.size() != 6)
+
+  vnl_matrix_fixed<float, 3, 3> clVnlR;
+
+  if (!GetOrientationMatrix(clDicomTags, clVnlR))
     return p_clSlice3D; // Uhh?
-
-  vnl_vector_fixed<float, 3> clX, clY, clZ; // Temporaries for orientation calculation  
-
-  clX.copy_in(vImageOrientationPatient.data());
-  clY.copy_in(vImageOrientationPatient.data() + 3);
-  
-  clZ = vnl_cross_3d(clX, clY);
   
   DirectionType3D clR;
   
-  clR(0,0) = clX[0];
-  clR(1,0) = clX[1];
-  clR(2,0) = clX[2];
+  clR(0,0) = clVnlR[0][0];
+  clR(1,0) = clVnlR[1][0];
+  clR(2,0) = clVnlR[2][0];
   
-  clR(0,1) = clY[0];
-  clR(1,1) = clY[1];
-  clR(2,1) = clY[2];
+  clR(0,1) = clVnlR[0][1];
+  clR(1,1) = clVnlR[1][1];
+  clR(2,1) = clVnlR[2][1];
   
-  clR(0,2) = clZ[0];
-  clR(1,2) = clZ[1];
-  clR(2,2) = clZ[2];
+  clR(0,2) = clVnlR[0][2];
+  clR(1,2) = clVnlR[1][2];
+  clR(2,2) = clVnlR[2][2];
   
   p_clSlice3D->SetDirection(clR);
   
@@ -525,6 +614,130 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::str
   }
 
   return p_clReader->GetOutput();
+}
+
+template<typename PixelType, unsigned int Dimension>
+bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress) {
+  typedef itk::GDCMImageIO ImageIOType;
+  typedef itk::Image<PixelType, Dimension> ImageType;
+  typedef itk::Image<PixelType, 3> VolumeType;
+  typedef itk::Image<PixelType, 2> SliceType;
+  typedef itk::ImageSeriesWriter<VolumeType, SliceType> WriterType;
+  typedef itk::NumericSeriesFileNames FileNamesGeneratorType;
+  typedef typename WriterType::DictionaryArrayType DictionaryArrayType;
+  typedef typename WriterType::DictionaryRawPointer DictionaryRawPointer;
+
+  static_assert((Dimension == 2 || Dimension == 3), "Only 2D or 3D images are supported.");
+
+  if (!p_clImage)
+    return false;
+
+  // NOTE: We can get away with such trickery since the reference count is managed by the object itself (and not the itk::SmartPointer wrapping it)
+  if (Dimension == 2)
+    return SaveDicomSlice<PixelType>((SliceType *)p_clImage.GetPointer(), strPath, bCompress); // Cast to prevent compiler error... we NEVER reach this in 3D anyway
+
+  itk::MetaDataDictionary clRefTags = p_clImage->GetMetaDataDictionary();
+
+  {
+    // Quick test to see if the reference tags are DICOM
+    std::string strSeriesUID;
+    if (!ExposeStringMetaData(clRefTags, "0020|000e", strSeriesUID)) {
+      std::cerr << "Error: Reference meta data does not appear to be DICOM?" << std::endl;
+      return false;
+    }
+  }
+
+  typename ImageType::PointType clOrigin = p_clImage->GetOrigin();
+  typename ImageType::SpacingType clSpacing = p_clImage->GetSpacing();
+  typename ImageType::DirectionType clDirection = p_clImage->GetDirection();
+  typename ImageType::SizeType clSize = p_clImage->GetBufferedRegion().GetSize();
+
+  std::string strNewSeriesUID;
+
+  {
+    gdcm::UIDGenerator clGenUID;
+    strNewSeriesUID = clGenUID.Generate();
+  }
+
+  DictionaryArrayType clDictionaryArray;
+
+  for (itk::IndexValueType z = 0; z < clSize[2]; ++z) {
+    DictionaryRawPointer p_clNewTags = new itk::MetaDataDictionary();
+
+    CopyStringMetaData(*p_clNewTags, clRefTags);
+
+    std::string strNewSopInstanceUID;
+
+    {
+      gdcm::UIDGenerator clGenUID;
+      strNewSopInstanceUID = clGenUID.Generate();
+    }
+
+    EncapsulateStringMetaData(*p_clNewTags, "0020|000e", strNewSeriesUID);
+    EncapsulateStringMetaData(*p_clNewTags, "0008|0018", strNewSopInstanceUID);
+    EncapsulateStringMetaData(*p_clNewTags, "0008|0003", strNewSopInstanceUID);
+
+    // Image number
+    EncapsulateStringMetaData(*p_clNewTags, "0020|0013", z+1);
+
+    // Derivation description
+    EncapsulateStringMetaData(*p_clNewTags, "0008|2111", std::string("ComputeBValue"));
+    
+    typename ImageType::IndexType clIndex;
+    typename ImageType::PointType clPosition;
+    clIndex[0] = clIndex[1] = 0;
+    clIndex[2] = z;
+
+    p_clImage->TransformIndexToPhysicalPoint(clIndex, clPosition);
+
+    // Image position patient
+    EncapsulateStringMetaData(*p_clNewTags, "0020|0032", clPosition);
+
+    // Slice location
+    EncapsulateStringMetaData(*p_clNewTags, "0020|1041", clPosition[2]);
+
+    // Slice thickness and spacing between slices (probably not right, but from ITK example!)
+    EncapsulateStringMetaData(*p_clNewTags, "0018|0050", clSpacing[2]);
+    EncapsulateStringMetaData(*p_clNewTags, "0018|0088", clSpacing[2]);
+
+    clDictionaryArray.push_back(p_clNewTags);
+  }
+
+  MkDir(strPath);
+
+  FileNamesGeneratorType::Pointer p_clFileNamesGenerator = FileNamesGeneratorType::New();
+
+  if (strPath.find("%d") != std::string::npos)
+    p_clFileNamesGenerator->SetSeriesFormat(strPath);
+  else
+    p_clFileNamesGenerator->SetSeriesFormat(strPath + "/%d.dcm");
+
+  p_clFileNamesGenerator->SetStartIndex(1);
+  p_clFileNamesGenerator->SetEndIndex(clSize[2]);
+
+  ImageIOType::Pointer p_clImageIO = ImageIOType::New();
+
+  p_clImageIO->KeepOriginalUIDOn();
+  p_clImageIO->SetUseCompression(bCompress);
+
+  typename WriterType::Pointer p_clWriter = WriterType::New();
+
+  p_clWriter->SetImageIO(p_clImageIO);
+  p_clWriter->SetFileNames(p_clFileNamesGenerator->GetFileNames());
+  p_clWriter->SetMetaDataDictionaryArray(&clDictionaryArray);
+  p_clWriter->SetUseCompression(bCompress);
+
+  p_clWriter->SetInput((const VolumeType *)p_clImage.GetPointer()); // Cast to prevent compiler error ... we NEVER reach this in 2D anyway
+
+  try {
+    p_clWriter->Update();
+  }
+  catch (itk::ExceptionObject &e) {
+    std::cerr << "Error: " << e << std::endl;
+    return false;
+  }
+  
+  return true;
 }
 
 #endif // !COMMON_H

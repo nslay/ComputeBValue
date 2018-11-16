@@ -121,6 +121,22 @@ bool ParseITKTag(const std::string &strKey, uint16_t &ui16Group, uint16_t &ui16E
   return true;
 }
 
+void CopyStringMetaData(itk::MetaDataDictionary &clNew, const itk::MetaDataDictionary &clOriginal) {
+  typedef itk::MetaDataObject<std::string> StringMetaDataType;
+
+  clNew.Clear();
+
+  for (auto itr = clOriginal.Begin(); itr != clOriginal.End(); ++itr) {
+    const StringMetaDataType * const p_clStringMeta = dynamic_cast<const StringMetaDataType *>(itr->second.GetPointer());
+
+    if (p_clStringMeta != nullptr) {
+      StringMetaDataType::Pointer p_clNewStringMeta = StringMetaDataType::New();
+      p_clNewStringMeta->SetMetaDataObjectValue(p_clStringMeta->GetMetaDataObjectValue());
+      clNew[itr->first] = p_clNewStringMeta;
+    }
+  }
+}
+
 template<>
 bool ExposeStringMetaData<std::vector<float>>(const itk::MetaDataDictionary &clTags, const std::string &strKey, std::vector<float> &vValues) {
   std::string strValue;
@@ -188,6 +204,62 @@ bool ExposeStringMetaData<gdcm::CSAHeader>(const itk::MetaDataDictionary &clTags
   clDataElement.SetByteValue(vBuffer.data(), vBuffer.size());
 
   return clCSAHeader.LoadFromDataElement(clDataElement);
+}
+
+template<>
+void EncapsulateStringMetaData<std::vector<float>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::vector<float> &vValues) {
+  if (vValues.empty())
+    return;
+
+  std::stringstream valueStream;
+  valueStream << vValues[0];
+
+  for (size_t i = 1; i < vValues.size(); ++i)
+    valueStream << '\\' << vValues[i];
+
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+void EncapsulateStringMetaData<std::vector<double>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const std::vector<double> &vValues) {
+  if (vValues.empty())
+    return;
+
+  std::stringstream valueStream;
+  valueStream << vValues[0];
+
+  for (size_t i = 1; i < vValues.size(); ++i)
+    valueStream << '\\' << vValues[i];
+
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+void EncapsulateStringMetaData<itk::Point<float, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<float, 3> &clPoint) {
+  std::stringstream valueStream;
+  valueStream << clPoint[0] << '\\' << clPoint[1] << '\\' << clPoint[2];
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+void EncapsulateStringMetaData<itk::Point<float, 2>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<float, 2> &clPoint) {
+  std::stringstream valueStream;
+  valueStream << clPoint[0] << '\\' << clPoint[1];
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+void EncapsulateStringMetaData<itk::Point<double, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<double, 3> &clPoint) {
+  std::stringstream valueStream;
+  valueStream << clPoint[0] << '\\' << clPoint[1] << '\\' << clPoint[2];
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
+}
+
+template<>
+void EncapsulateStringMetaData<itk::Point<double, 2>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<double, 2> &clPoint) {
+  std::stringstream valueStream;
+  valueStream << clPoint[0] << '\\' << clPoint[1];
+  EncapsulateStringMetaData(clTags, strKey, valueStream.str());
 }
 
 template<>

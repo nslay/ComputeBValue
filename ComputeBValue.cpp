@@ -80,13 +80,6 @@ void Usage(const char *p_cArg0) {
   exit(1);
 }
 
-// Needed for sorting the B value dictionaries
-template<typename RealType>
-bool GetOrientationMatrix(const itk::MetaDataDictionary &clDicomTags, vnl_matrix_fixed<RealType, 3, 3> &clOrientation);
-
-template<typename RealType>
-bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<RealType, 3> &clOrigin);
-
 // Change name from ComputeDiffusionBValue* to GetDiffusionBValue* (since this program actually calculates B value images!)
 double GetDiffusionBValue(const itk::MetaDataDictionary &clDicomTags);
 double GetDiffusionBValueSiemens(const itk::MetaDataDictionary &clDicomTags);
@@ -165,6 +158,9 @@ protected:
 
   template<typename PixelType>
   typename itk::Image<PixelType, 3>::Pointer NewImage() const;
+
+  template<typename PixelType>
+  bool SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const;
 
   virtual double Solve(const itk::Index<3> &clIndex) = 0; // Return b-value or negative value for failure
 
@@ -317,7 +313,7 @@ int main(int argc, char **argv) {
 
     for (const auto &stPair : mTmp) {
       std::cout << "Info: Loaded b = " << stPair.first << std::endl;
-      SaveImg<short, 3>(stPair.second, "b" + std::to_string(stPair.first) + ".mha");
+      //SaveImg<short, 3>(stPair.second, "b" + std::to_string(stPair.first) + ".mha");
 
       if (!mImagesByBValue.emplace(stPair).second) {
         std::cerr << "Error: Duplicate b-value " << stPair.first << " from series " << argv[i] << std::endl;
@@ -347,46 +343,6 @@ int main(int argc, char **argv) {
   }
 
   return 0;
-}
-
-template<typename RealType>
-bool GetOrientationMatrix(const itk::MetaDataDictionary &clDicomTags, vnl_matrix_fixed<RealType, 3, 3> &clOrientation) {
-  std::vector<RealType> vImageOrientationPatient; // 0020|0037
-
-  if (!ExposeStringMetaData(clDicomTags, "0020|0037", vImageOrientationPatient) || vImageOrientationPatient.size() != 6)
-    return false;
-
-  vnl_vector_fixed<RealType, 3> clX, clY, clZ;
-
-  clX.copy_in(vImageOrientationPatient.data());
-  clY.copy_in(vImageOrientationPatient.data() + 3);
-  clZ = vnl_cross_3d(clX, clY);
-
-  clOrientation[0][0] = clX[0];
-  clOrientation[1][0] = clX[1];
-  clOrientation[2][0] = clX[2];
-
-  clOrientation[0][1] = clY[0];
-  clOrientation[1][1] = clY[1];
-  clOrientation[2][1] = clY[2];
-
-  clOrientation[0][2] = clZ[0];
-  clOrientation[1][2] = clZ[1];
-  clOrientation[2][2] = clZ[2];
-
-  return true;
-}
-
-template<typename RealType>
-bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<RealType, 3> &clOrigin) {
-  std::vector<RealType> vImagePositionPatient; // 0020|0032
-
-  if (!ExposeStringMetaData(clDicomTags, "0020|0032", vImagePositionPatient) || vImagePositionPatient.size() != clOrigin.size())
-    return false;
-
-  clOrigin.copy_in(vImagePositionPatient.data());
-
-  return true;
 }
 
 double GetDiffusionBValue(const itk::MetaDataDictionary &clDicomTags) {
@@ -699,6 +655,13 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
       return MapType();
     }
 
+    typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
+    p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
+
+    std::string strTmp;
+    if (!itk::ExposeMetaData(p_clImage->GetMetaDataDictionary(), "0020|000e", strTmp))
+      std::cerr << "WTF!!!" << std::endl;
+
     mImagesByBValue[stBValueFilesPair.first] = p_clReader->GetOutput();
   }
 
@@ -728,6 +691,28 @@ typename itk::Image<PixelType, 3>::Pointer BValueModel::NewImage() const {
   p_clImage->FillBuffer(OtherImageType::PixelType());    
 
   return p_clImage;
+}
+
+template<typename PixelType>
+bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const {
+  if (GetExtension(strPath).size() > 0)
+    return ::SaveImg<PixelType, 3>(p_clImage, strPath); // Has an extension, it's a file
+
+  itk::MetaDataDictionary clDicomTags = GetImages().begin()->second->GetMetaDataDictionary();
+
+  EncapsulateStringMetaData(clDicomTags, "0018|9087", GetTargetBValue());
+  EncapsulateStringMetaData(clDicomTags, "0020|0011", iSeriesNumber);
+  EncapsulateStringMetaData(clDicomTags, "0018|103e", strSeriesDescription);
+
+  p_clImage->SetMetaDataDictionary(clDicomTags);
+
+  std::string strSeriesUID;
+  if (!itk::ExposeMetaData(clDicomTags, "0020|000e", strSeriesUID)) {
+    std::cerr << "Really no series UID... ?: " << strSeriesUID << std::endl;
+  }
+
+
+  return SaveDicomImage<PixelType, 3>(p_clImage, strPath);
 }
 
 bool BValueModel::SetLogIntensities(const itk::Index<3> &clIndex) {
@@ -797,7 +782,11 @@ bool BValueModel::Run() {
   }
 
   std::cout << "Info: Saving b-value image to '" << GetOutputPath() << "' ..." << std::endl;
-  if (!SaveImg<ImageType::PixelType, 3>(p_clBNImage, GetOutputPath())) {
+
+  std::stringstream descStream;
+  descStream << "Calculated b-" << GetTargetBValue() << " image" << std::endl;
+
+  if (!SaveImage<ImageType::PixelType>(p_clBNImage, GetOutputPath(), 13701, descStream.str())) {
     std::cerr << "Error: Failed to save b-value image." << std::endl;
     return false;
   }
@@ -832,7 +821,7 @@ bool MonoExponentialModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImg<ImageType::PixelType, 3>(m_p_clADCImage, GetADCOutputPath())) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -911,8 +900,8 @@ bool IVIMModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImg<ImageType::PixelType, 3>(m_p_clADCImage, GetADCOutputPath())) {
-      std::cerr << "Error: Failed to save ADC value image." << std::endl;
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
+      std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
   }
@@ -920,7 +909,7 @@ bool IVIMModel::Run() {
   if (m_p_clPerfusionImage.IsNotNull()) {
     std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImg<FloatImageType::PixelType, 3>(m_p_clPerfusionImage, GetPerfusionOutputPath())) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), 13703, "Calculated Perfusion Fraction")) {
       std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
       return false;
     }
