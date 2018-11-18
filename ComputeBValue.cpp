@@ -102,6 +102,8 @@ public:
 
   virtual ~BValueModel() = default;
 
+  virtual std::string Name() const = 0;
+
   virtual bool Good() const { 
     if (GetOutputPath().empty() || GetTargetBValue() < 0.0 || m_mImagesByBValue.size() < 2)
       return false;
@@ -212,6 +214,8 @@ public:
 
   virtual ~MonoExponentialModel() = default;
 
+  virtual std::string Name() const override { return "Mono Exponential"; }
+
   virtual bool SaveADC() override { return m_bSaveADC = true; }
 
   std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
@@ -242,6 +246,8 @@ public:
   : SuperType(ADVarType::GetNumIndependents()) { }
 
   virtual ~IVIMModel() = default;
+
+  virtual std::string Name() const override { return "IVIM"; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -278,6 +284,8 @@ public:
   : SuperType(ADVarType::GetNumIndependents()) { }
 
   virtual ~DKModel() = default;
+
+  virtual std::string Name() const override { return "DK"; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -881,7 +889,7 @@ bool BValueModel::Run() {
   std::cout << "Info: Saving b-value image to '" << GetOutputPath() << "' ..." << std::endl;
 
   std::stringstream descStream;
-  descStream << "Calculated b-" << GetTargetBValue() << std::endl;
+  descStream << Name() << ": Calculated b-" << GetTargetBValue();
 
   if (!SaveImage<ImageType::PixelType>(p_clBNImage, GetOutputPath(), GetSeriesNumber(), descStream.str())) {
     std::cerr << "Error: Failed to save b-value image." << std::endl;
@@ -921,7 +929,7 @@ bool MonoExponentialModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), Name() + ": Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -1004,7 +1012,7 @@ bool IVIMModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), Name() + ": Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -1013,7 +1021,7 @@ bool IVIMModel::Run() {
   if (m_p_clPerfusionImage.IsNotNull()) {
     std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), "Calculated Perfusion Fraction")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), Name() + ": Calculated Perfusion Fraction")) {
       std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
       return false;
     }
@@ -1104,7 +1112,7 @@ bool DKModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), Name() + ": Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -1113,7 +1121,7 @@ bool DKModel::Run() {
   if (m_p_clPerfusionImage.IsNotNull()) {
     std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), "Calculated Perfusion Fraction")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), Name() + ": Calculated Perfusion Fraction")) {
       std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
       return false;
     }
@@ -1122,7 +1130,7 @@ bool DKModel::Run() {
   if (m_p_clKurtosisImage.IsNotNull()) {
     std::cout << "Info: Saving kurtosis image to '" << GetKurtosisOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clKurtosisImage, GetKurtosisOutputPath(), GetKurtosisSeriesNumber(), "Calculated Kurtosis")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clKurtosisImage, GetKurtosisOutputPath(), GetKurtosisSeriesNumber(), Name() + ": Calculated Kurtosis")) {
       std::cerr << "Error: Failed to save kurtosis image." << std::endl;
       return false;
     }
