@@ -282,6 +282,172 @@ bool ExposeCSAMetaData<std::string>(gdcm::CSAHeader &clHeader, const std::string
   return true;
 }
 
+template<>
+bool SetDicomPixelInformation<int8_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 8); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 8); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 7); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 1); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<uint8_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 8); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 8); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 7); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 0); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<int16_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 16); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 16); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 15); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 1); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<uint16_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 16); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 16); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 15); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 0); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<int32_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 32); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 32); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 31); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 1); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<uint32_t>(itk::MetaDataDictionary &clTags) {
+  std::string strPixelRep;
+  ExposeStringMetaData(clTags, "0028|0004", strPixelRep);
+
+  if (strPixelRep != "MONOCHROME2" && strPixelRep != "MONOCHROME1")
+    EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  
+  EncapsulateStringMetaData(clTags, "0028|0100", 32); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 32); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 31); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 0); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<float>(itk::MetaDataDictionary &clTags) {
+  EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  EncapsulateStringMetaData(clTags, "0028|0100", 32); // Bits allocated
+
+  // Not relevant for float/double data
+  clTags.Erase("0028|0101");
+  clTags.Erase("0028|0102");
+  clTags.Erase("0028|0103");
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<double>(itk::MetaDataDictionary &clTags) {
+  EncapsulateStringMetaData(clTags, "0028|0004", std::string("MONOCHROME2"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 1); // Samples per pixel
+  EncapsulateStringMetaData(clTags, "0028|0100", 64); // Bits allocated
+
+  // Not relevant for float/double data
+  clTags.Erase("0028|0101");
+  clTags.Erase("0028|0102");
+  clTags.Erase("0028|0103");
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<itk::RGBPixel<uint8_t>>(itk::MetaDataDictionary &clTags) {
+  EncapsulateStringMetaData(clTags, "0028|0004", std::string("RGB"));
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 3); // Samples per pixel
+
+  EncapsulateStringMetaData(clTags, "0028|0100", 8); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 8); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 7); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 0); // pixel rep
+
+  return true;
+}
+
+template<>
+bool SetDicomPixelInformation<itk::RGBAPixel<uint8_t>>(itk::MetaDataDictionary &clTags) {
+  EncapsulateStringMetaData(clTags, "0028|0004", std::string("ARGB")); // XXX: Retired!
+
+  EncapsulateStringMetaData(clTags, "0028|0002", 4); // Samples per pixel
+
+  EncapsulateStringMetaData(clTags, "0028|0100", 8); // bits allocated
+  EncapsulateStringMetaData(clTags, "0028|0101", 8); // bits stored
+  EncapsulateStringMetaData(clTags, "0028|0102", 7); // high bit
+  EncapsulateStringMetaData(clTags, "0028|0103", 0); // pixel rep
+
+  return true;
+}
+
 #ifdef _WIN32
 bool FileExists(const std::string &strPath) {
   return GetFileAttributes(strPath.c_str()) != INVALID_FILE_ATTRIBUTES;

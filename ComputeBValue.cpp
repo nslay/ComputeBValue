@@ -69,12 +69,14 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-ahkp] [-o outputPath] -b targetBValue mono|ivim|dk diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;
+  std::cerr << "-c -- Compress output." << std::endl;
   std::cerr << "-h -- This help message." << std::endl;
   std::cerr << "-k -- Save calculated kurtosis image. The output path will have _Kurtosis appended." << std::endl;
+  std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
   exit(1);
@@ -125,6 +127,9 @@ public:
   virtual bool SavePerfusion() { return false; }
   virtual bool SaveKurtosis() { return false; }
 
+  void SetCompress(bool bCompress) { m_bCompress = bCompress; }
+  bool GetCompress() const { return m_bCompress; }
+
   void SetOutputPath(const std::string &strOutputPath) {
     m_strOutputPath = strOutputPath;
   }
@@ -147,6 +152,9 @@ public:
 
   void SetTargetBValue(double dTargetBValue) { m_dTargetBValue = dTargetBValue; }
   double GetTargetBValue() const { return m_dTargetBValue; }
+
+  void SetSeriesNumber(int iSeriesNumber) { m_iSeriesNumber = iSeriesNumber; }
+  int GetSeriesNumber() const { return m_iSeriesNumber; }
 
   virtual bool Run();
 
@@ -173,6 +181,13 @@ protected:
     return GetImages().begin()->first;
   }
 
+  double MaxBValue() const {
+    if (GetImages().empty())
+      return -1.0;
+
+    return GetImages().rbegin()->first;
+  }
+
   const std::vector<std::pair<double, double>> & GetLogIntensities() const { return m_vBValueAndLogIntensity; }
 
   SolverType & GetSolver() { return m_clSolver; }
@@ -183,6 +198,8 @@ private:
   std::string m_strOutputPath;
   double m_dTargetBValue = -1.0;
   std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
+  int m_iSeriesNumber = 13701;
+  bool m_bCompress = false;
 };
 
 class MonoExponentialModel : public BValueModel {
@@ -204,6 +221,8 @@ public:
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
+  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
+
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
 
@@ -216,7 +235,8 @@ class IVIMModel : public BValueModel {
 public:
   typedef BValueModel SuperType;
   typedef ADVar<double, 3> ADVarType;
-  typedef itk::Image<float, 3> FloatImageType;
+  //typedef itk::Image<float, 3> FloatImageType; // As of 4.13, ITK does not support outputing float/double DICOM
+  typedef itk::Image<short, 3> FloatImageType;
 
   IVIMModel()
   : SuperType(ADVarType::GetNumIndependents()) { }
@@ -234,6 +254,9 @@ public:
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
+  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
+  int GetPerfusionSeriesNumber() const { return GetSeriesNumber()+2; }
+
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
 
@@ -248,7 +271,8 @@ class DKModel : public BValueModel {
 public:
   typedef BValueModel SuperType;
   typedef ADVar<double, 4> ADVarType;
-  typedef itk::Image<float, 3> FloatImageType;
+  //typedef itk::Image<float, 3> FloatImageType; // As of 4.13, ITK does not support outputing float/double DICOM
+  typedef itk::Image<short, 3> FloatImageType;
 
   DKModel()
   : SuperType(ADVarType::GetNumIndependents()) { }
@@ -268,6 +292,10 @@ public:
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
+  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
+  int GetPerfusionSeriesNumber() const { return GetSeriesNumber()+2; }
+  int GetKurtosisSeriesNumber() const { return GetSeriesNumber()+3; }
+
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
 
@@ -286,13 +314,15 @@ int main(int argc, char **argv) {
   bool bSaveADC = false;
   bool bSavePerfusion = false;
   bool bSaveKurtosis = false;
+  int iSeriesNumber = 13701;
+  bool bCompress = false;
 
   double dBValue = -1.0;
 
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:hko:p")) != -1) {
+  while ((c = getopt(argc, argv, "ab:hkn:o:p")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
@@ -302,6 +332,9 @@ int main(int argc, char **argv) {
       if (dBValue < 0.0)
         Usage(p_cArg0);
       break;
+    case 'c':
+      bCompress = true;
+      break;
     case 'h':
       Usage(p_cArg0);
       break;
@@ -310,6 +343,18 @@ int main(int argc, char **argv) {
       break;
     case 'o':
       strOutputPath = optarg;
+      break;
+    case 'n':
+      {
+        char *p = nullptr;
+        iSeriesNumber = strtol(optarg, &p, 10);
+
+        if (*p != '\0' /*|| iSeriesNumber <= 0*/) // OK... I guess technically series number can also be 0 or negative... so says NEMA
+          Usage(p_cArg0);
+
+        // See (0020,0011) in http://dicom.nema.org/medical/dicom/current/output/chtml/part06/chapter_6.html
+        // And 'IS' in http://dicom.nema.org/medical/dicom/current/output/chtml/part05/sect_6.2.html
+      }
       break;
     case 'p':
       bSavePerfusion = true;
@@ -364,6 +409,8 @@ int main(int argc, char **argv) {
   p_clModel->SetTargetBValue(dBValue);
   p_clModel->SetImages(mImagesByBValue);
   p_clModel->SetOutputPath(strOutputPath);
+  p_clModel->SetSeriesNumber(iSeriesNumber);
+  p_clModel->SetCompress(bCompress);
 
   if (bSaveADC && !p_clModel->SaveADC())
     std::cerr << "Warning: '" << strModel << "' model does not support saving ADC images." << std::endl;
@@ -697,10 +744,6 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
     typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
     p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
 
-    std::string strTmp;
-    if (!itk::ExposeMetaData(p_clImage->GetMetaDataDictionary(), "0020|000e", strTmp))
-      std::cerr << "WTF!!!" << std::endl;
-
     mImagesByBValue[stBValueFilesPair.first] = p_clReader->GetOutput();
   }
 
@@ -735,26 +778,24 @@ typename itk::Image<PixelType, 3>::Pointer BValueModel::NewImage() const {
 template<typename PixelType>
 bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const {
   if (GetExtension(strPath).size() > 0)
-    return ::SaveImg<PixelType, 3>(p_clImage, strPath); // Has an extension, it's a file
+    return ::SaveImg<PixelType, 3>(p_clImage, strPath, GetCompress()); // Has an extension, it's a file
 
   itk::MetaDataDictionary clDicomTags = GetImages().begin()->second->GetMetaDataDictionary();
 
+  clDicomTags.Erase("0028|1050"); // Window center
+  clDicomTags.Erase("0028|1051"); // Window width
+  clDicomTags.Erase("0028|1055"); // Window width/center explanation
+
   EncapsulateStringMetaData(clDicomTags, "0018|9087", GetTargetBValue());
   EncapsulateStringMetaData(clDicomTags, "0020|0011", iSeriesNumber);
-  EncapsulateStringMetaData(clDicomTags, "0018|103e", strSeriesDescription);
+  EncapsulateStringMetaData(clDicomTags, "0008|103e", strSeriesDescription);
 
   // Derivation description
   EncapsulateStringMetaData(clDicomTags, "0008|2111", std::string("ComputeBValue"));
 
   p_clImage->SetMetaDataDictionary(clDicomTags);
 
-  std::string strSeriesUID;
-  if (!itk::ExposeMetaData(clDicomTags, "0020|000e", strSeriesUID)) {
-    std::cerr << "Really no series UID... ?: " << strSeriesUID << std::endl;
-  }
-
-
-  return SaveDicomImage<PixelType, 3>(p_clImage, strPath);
+  return SaveDicomImage<PixelType, 3>(p_clImage, strPath, GetCompress());
 }
 
 bool BValueModel::SetLogIntensities(const itk::Index<3> &clIndex) {
@@ -828,7 +869,7 @@ bool BValueModel::Run() {
   std::stringstream descStream;
   descStream << "Calculated b-" << GetTargetBValue() << std::endl;
 
-  if (!SaveImage<ImageType::PixelType>(p_clBNImage, GetOutputPath(), 13701, descStream.str())) {
+  if (!SaveImage<ImageType::PixelType>(p_clBNImage, GetOutputPath(), GetSeriesNumber(), descStream.str())) {
     std::cerr << "Error: Failed to save b-value image." << std::endl;
     return false;
   }
@@ -863,7 +904,7 @@ bool MonoExponentialModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -942,7 +983,7 @@ bool IVIMModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -951,7 +992,7 @@ bool IVIMModel::Run() {
   if (m_p_clPerfusionImage.IsNotNull()) {
     std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), 13703, "Calculated Perfusion Fraction")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), "Calculated Perfusion Fraction")) {
       std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
       return false;
     }
@@ -990,7 +1031,7 @@ double IVIMModel::Solve(const itk::Index<3> &clIndex) {
     m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(std::min(4095.0, 1e6*clX[0] + 0.5)));
 
   if (m_p_clPerfusionImage.IsNotNull())
-    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
+    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1e3*(1.0 - std::exp(clX[2]))));
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
@@ -1039,7 +1080,7 @@ bool DKModel::Run() {
   if (m_p_clADCImage.IsNotNull()) {
     std::cout << "Info: Saving ADC image to '" << GetADCOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), 13702, "Calculated ADC")) {
+    if (!SaveImage<ImageType::PixelType>(m_p_clADCImage, GetADCOutputPath(), GetADCSeriesNumber(), "Calculated ADC")) {
       std::cerr << "Error: Failed to save ADC image." << std::endl;
       return false;
     }
@@ -1048,7 +1089,7 @@ bool DKModel::Run() {
   if (m_p_clPerfusionImage.IsNotNull()) {
     std::cout << "Info: Saving perfusion fraction image to '" << GetPerfusionOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), 13703, "Calculated Perfusion Fraction")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clPerfusionImage, GetPerfusionOutputPath(), GetPerfusionSeriesNumber(), "Calculated Perfusion Fraction")) {
       std::cerr << "Error: Failed to save perfusion fraction image." << std::endl;
       return false;
     }
@@ -1057,7 +1098,7 @@ bool DKModel::Run() {
   if (m_p_clKurtosisImage.IsNotNull()) {
     std::cout << "Info: Saving kurtosis image to '" << GetKurtosisOutputPath() << "' ..." << std::endl;
 
-    if (!SaveImage<FloatImageType::PixelType>(m_p_clKurtosisImage, GetKurtosisOutputPath(), 13704, "Calculated Kurtosis")) {
+    if (!SaveImage<FloatImageType::PixelType>(m_p_clKurtosisImage, GetKurtosisOutputPath(), GetKurtosisSeriesNumber(), "Calculated Kurtosis")) {
       std::cerr << "Error: Failed to save kurtosis image." << std::endl;
       return false;
     }
@@ -1101,10 +1142,10 @@ double DKModel::Solve(const itk::Index<3> &clIndex) {
     m_p_clADCImage->SetPixel(clIndex, ImageType::PixelType(std::min(4095.0, 1e6*clX[0] + 0.5)));
 
   if (m_p_clPerfusionImage.IsNotNull())
-    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
+    m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1e3*(1.0 - std::exp(clX[2])) + 0.5));
 
   if (m_p_clKurtosisImage.IsNotNull())
-    m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3] < 15.0 ? clX[3] : 0.0));
+    m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3] < 0.1 ? 1e5*clX[3] + 0.5 : 0.0));
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 

@@ -616,6 +616,59 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::str
   return p_clReader->GetOutput();
 }
 
+// For flexible support of 0028|0106 and 0028|0107
+template<typename PixelType>
+bool ComputePixelMinMax(const PixelType *p_begin, const PixelType *p_end, PixelType &minValue, PixelType &maxValue) {
+  auto stPair = std::minmax_element(p_begin, p_end);
+  minValue = *stPair.first;
+  maxValue = *stPair.second;
+  return true;
+}
+
+template<>
+inline bool ComputePixelMinMax<itk::RGBPixel<uint8_t>>(const itk::RGBPixel<uint8_t> *, const itk::RGBPixel<uint8_t> *, itk::RGBPixel<uint8_t> &, itk::RGBPixel<uint8_t> &) {
+  return false;
+}
+
+template<>
+inline bool ComputePixelMinMax<itk::RGBAPixel<uint8_t>>(const itk::RGBAPixel<uint8_t> *, const itk::RGBAPixel<uint8_t> *, itk::RGBAPixel<uint8_t> &, itk::RGBAPixel<uint8_t> &) {
+  return false;
+}
+
+
+template<typename PixelType>
+bool SetDicomPixelInformation(itk::MetaDataDictionary &) { return false; }
+
+template<>
+bool SetDicomPixelInformation<int8_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<uint8_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<int16_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<uint16_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<int32_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<uint32_t>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<float>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<double>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<itk::RGBPixel<uint8_t>>(itk::MetaDataDictionary &clTags);
+
+template<>
+bool SetDicomPixelInformation<itk::RGBAPixel<uint8_t>>(itk::MetaDataDictionary &clTags);
+
 template<typename PixelType, unsigned int Dimension>
 bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress) {
   typedef itk::GDCMImageIO ImageIOType;
@@ -629,7 +682,7 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
 
   static_assert((Dimension == 2 || Dimension == 3), "Only 2D or 3D images are supported.");
 
-  if (!p_clImage)
+  if (!p_clImage || !SetDicomPixelInformation<PixelType>(p_clImage->GetMetaDataDictionary()))
     return false;
 
   // NOTE: We can get away with such trickery since the reference count is managed by the object itself (and not the itk::SmartPointer wrapping it)
@@ -696,6 +749,17 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
     // Slice thickness and spacing between slices (probably not right, but from ITK example!)
     EncapsulateStringMetaData(*p_clNewTags, "0018|0050", clSpacing[2]);
     EncapsulateStringMetaData(*p_clNewTags, "0018|0088", clSpacing[2]);
+
+
+    const PixelType * const p_begin = p_clImage->GetBufferPointer() + (z*clSize[0]*clSize[1]);
+    const PixelType * const p_end = p_begin + (clSize[0]*clSize[1]);
+
+    PixelType minValue = PixelType(), maxValue = PixelType();
+
+    if (ComputePixelMinMax(p_begin, p_end, minValue, maxValue)) {
+      EncapsulateStringMetaData(*p_clNewTags, "0028|0106", minValue);
+      EncapsulateStringMetaData(*p_clNewTags, "0028|0107", maxValue);
+    }
 
     clDictionaryArray.push_back(p_clNewTags);
   }
