@@ -750,7 +750,6 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
     EncapsulateStringMetaData(*p_clNewTags, "0018|0050", clSpacing[2]);
     EncapsulateStringMetaData(*p_clNewTags, "0018|0088", clSpacing[2]);
 
-
     const PixelType * const p_begin = p_clImage->GetBufferPointer() + (z*clSize[0]*clSize[1]);
     const PixelType * const p_end = p_begin + (clSize[0]*clSize[1]);
 
@@ -759,6 +758,10 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
     if (ComputePixelMinMax(p_begin, p_end, minValue, maxValue)) {
       EncapsulateStringMetaData(*p_clNewTags, "0028|0106", minValue);
       EncapsulateStringMetaData(*p_clNewTags, "0028|0107", maxValue);
+    }
+    else {
+      p_clNewTags->Erase("0028|0106");
+      p_clNewTags->Erase("0028|0107");
     }
 
     clDictionaryArray.push_back(p_clNewTags);
