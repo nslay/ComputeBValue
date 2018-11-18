@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:hkn:o:p")) != -1) {
+  while ((c = getopt(argc, argv, "ab:chkn:o:p")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
@@ -911,7 +911,7 @@ bool MonoExponentialModel::Run() {
 
   vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
   clBoundSelection[0] = 1; // ADC cannot be negative
-  clBoundSelection[1] = 3; // Log b-value should always be negative
+  //clBoundSelection[1] = 3; // Log b-value should always be negative (not true if we compute smaller b-values)
 
   vnl_vector<double> clLowerBound(clBoundSelection.size(), 0.0); // By default, lower bound is 0.0
   vnl_vector<double> clUpperBound(clBoundSelection.size(), 0.0);
@@ -990,7 +990,7 @@ bool IVIMModel::Run() {
 
   vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
   clBoundSelection[0] = 1; // ADC cannot be negative
-  clBoundSelection[1] = 3; // Log b-value should be negative
+  clBoundSelection[1] = 3; // Log b-value should be negative (we already have B0, so nothing smaller)
   clBoundSelection[2] = 3; // Log perfusion fraction cannot be positive
 
   vnl_vector<double> clLowerBound(clBoundSelection.size(), 0.0); // By default, lower bound is 0.0 (if applicable)
@@ -1086,7 +1086,7 @@ bool DKModel::Run() {
 
   vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
   clBoundSelection[0] = 1; // ADC cannot be negative
-  clBoundSelection[1] = 3; // Log b-value should always be negative
+  clBoundSelection[1] = 3; // Log b-value should be negative (we already have B0, so nothing smaller)
   clBoundSelection[2] = 3; // Log perfusion fraction cannot be positive
   clBoundSelection[3] = 1; // Kurtosis cannot be negative
 
