@@ -79,7 +79,7 @@ public:
   // Unary operators
   ADVar operator-() const {
     ADVar clResult;
-    clResult.m_value = m_value;
+    clResult.m_value = -m_value;
     std::transform(m_gradient.begin(), m_gradient.end(), clResult.m_gradient.begin(), std::negate<RealType>());
     return clResult;
   }
