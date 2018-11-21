@@ -69,13 +69,14 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] [-l lambda] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;
   std::cerr << "-c -- Compress output." << std::endl;
   std::cerr << "-h -- This help message." << std::endl;
   std::cerr << "-k -- Save calculated kurtosis image. The output path will have _Kurtosis appended." << std::endl;
+  std::cerr << "-l -- Penalty weight for kurtosis models (L2 penalty on kurtosis term, default 1e-4)." << std::endl;
   std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
@@ -158,6 +159,9 @@ public:
   void SetSeriesNumber(int iSeriesNumber) { m_iSeriesNumber = iSeriesNumber; }
   int GetSeriesNumber() const { return m_iSeriesNumber; }
 
+  void SetLambda(double dLambda) { m_dLambda = dLambda; }
+  double GetLambda() const { return m_dLambda; }
+
   virtual bool Run();
 
   const ImageMapType & GetImages() const { return m_mImagesByBValue; }
@@ -207,6 +211,7 @@ private:
   std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
   int m_iSeriesNumber = 13701;
   bool m_bCompress = false;
+  double m_dLambda = 1e-4;
 };
 
 class MonoExponentialModel : public BValueModel {
@@ -364,13 +369,14 @@ int main(int argc, char **argv) {
   bool bSaveKurtosis = false;
   int iSeriesNumber = 13701;
   bool bCompress = false;
+  double dLambda = 1e-4;
 
   double dBValue = -1.0;
 
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:chkn:o:p")) != -1) {
+  while ((c = getopt(argc, argv, "ab:chkl:n:o:p")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
@@ -388,6 +394,13 @@ int main(int argc, char **argv) {
       break;
     case 'k':
       bSaveKurtosis = true;
+      break;
+    case 'l':
+      dLambda = FromString<double>(optarg, -1.0);
+
+      if (dLambda < 0.0)
+        Usage(p_cArg0);
+
       break;
     case 'o':
       strOutputPath = optarg;
@@ -457,6 +470,7 @@ int main(int argc, char **argv) {
   p_clModel->SetOutputPath(strOutputPath);
   p_clModel->SetSeriesNumber(iSeriesNumber);
   p_clModel->SetCompress(bCompress);
+  p_clModel->SetLambda(dLambda);
 
   if (bSaveADC && !p_clModel->SaveADC())
     std::cerr << "Warning: '" << strModel << "' model does not support saving ADC images." << std::endl;
@@ -854,7 +868,10 @@ bool BValueModel::SaveImage<float>(itk::Image<float, 3>::Pointer p_clImage, cons
 
   std::transform(p_clImage->GetBufferPointer(), p_clImage->GetBufferPointer() + p_clImage->GetBufferedRegion().GetNumberOfPixels(), p_clIntImage->GetBufferPointer(),
     [](const float &fPixel) -> ImageType::PixelType {
-      return ImageType::PixelType(1e4*fPixel + 0.5);
+      constexpr const double dMinValue = std::numeric_limits<ImageType::PixelType>::min();
+      constexpr const double dMaxValue = std::numeric_limits<ImageType::PixelType>::max();
+
+      return ImageType::PixelType(std::min(dMaxValue, std::max(dMinValue, std::round(1e4*fPixel))));
     });
 
   return SaveImage<ImageType::PixelType>(p_clIntImage, strPath, iSeriesNumber, strSeriesDescription);
@@ -1190,7 +1207,7 @@ void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<do
 
   ADVarType clBD = GetTargetBValue() * clD;
   clLoss += pow(-clBD - clLogS + clK * clBD * clBD / 6.0, 2);
-  clLoss += pow(clK, 2); // Another hack, possibly to prevent ambiguous solutions with the quadratic (could be two roots for D)
+  clLoss += GetLambda()*pow(clK, 2); // Another hack, possibly to prevent ambiguous solutions with the quadratic (could be two roots for D)
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
@@ -1304,7 +1321,7 @@ void DKIVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vecto
   clLoss += pow(clLogF - clBD - clLogS + clK * clBD * clBD / 6.0, 2);
 
   // These two terms compete to essentially cancel each other out... So these penalties try to prevent them from growing uncontrollably
-  clLoss += pow(clK, 2); // This works too... and slightly faster
+  clLoss += GetLambda()*pow(clK, 2); // This works too... and slightly faster
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
