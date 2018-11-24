@@ -69,14 +69,13 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] [-l lambda] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;
   std::cerr << "-c -- Compress output." << std::endl;
   std::cerr << "-h -- This help message." << std::endl;
   std::cerr << "-k -- Save calculated kurtosis image. The output path will have _Kurtosis appended." << std::endl;
-  std::cerr << "-l -- Penalty weight for kurtosis models (L2 penalty on kurtosis term, default 1e-4)." << std::endl;
   std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
@@ -161,9 +160,6 @@ public:
   void SetSeriesNumber(int iSeriesNumber) { m_iSeriesNumber = iSeriesNumber; }
   int GetSeriesNumber() const { return m_iSeriesNumber; }
 
-  void SetLambda(double dLambda) { m_dLambda = dLambda; }
-  double GetLambda() const { return m_dLambda; }
-
   virtual bool Run();
   virtual bool SaveImages() const;
 
@@ -208,6 +204,12 @@ protected:
     return GetImages().rbegin()->first;
   }
 
+  // Stupid Microsoft has a GetBValue macro
+  ImageType::Pointer GetBValueImage(double dBValue) const {
+    auto itr = GetImages().find(dBValue);
+    return itr != GetImages().end() ? itr->second : ImageType::Pointer();
+  }
+
   const std::vector<std::pair<double, double>> & GetLogIntensities() const { return m_vBValueAndLogIntensity; }
 
   SolverType & GetSolver() { return m_clSolver; }
@@ -221,7 +223,6 @@ private:
   std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
   int m_iSeriesNumber = 13701;
   bool m_bCompress = false;
-  double m_dLambda = 1e-4;
 };
 
 class MonoExponentialModel : public BValueModel {
@@ -256,6 +257,7 @@ protected:
 
 private:
   bool m_bSaveADC = false;
+  ImageType::Pointer m_p_clBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
 };
 
@@ -296,6 +298,7 @@ protected:
 private:
   bool m_bSaveADC = false;
   bool m_bSavePerfusion = false;
+  ImageType::Pointer m_p_clBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
 };
@@ -337,6 +340,7 @@ protected:
 private:
   bool m_bSaveADC = false;
   bool m_bSaveKurtosis = false;
+  ImageType::Pointer m_p_clBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
 };
@@ -383,6 +387,7 @@ private:
   bool m_bSaveADC = false;
   bool m_bSavePerfusion = false;
   bool m_bSaveKurtosis = false;
+  ImageType::Pointer m_p_clBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
@@ -396,14 +401,14 @@ int main(int argc, char **argv) {
   bool bSaveKurtosis = false;
   int iSeriesNumber = 13701;
   bool bCompress = false;
-  double dLambda = 1e-4;
+  double dLambda = 0.0;
 
   double dBValue = -1.0;
 
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:chkl:n:o:p")) != -1) {
+  while ((c = getopt(argc, argv, "ab:chkn:o:p")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
@@ -421,13 +426,6 @@ int main(int argc, char **argv) {
       break;
     case 'k':
       bSaveKurtosis = true;
-      break;
-    case 'l':
-      dLambda = FromString<double>(optarg, -1.0);
-
-      if (dLambda < 0.0)
-        Usage(p_cArg0);
-
       break;
     case 'o':
       strOutputPath = optarg;
@@ -497,7 +495,6 @@ int main(int argc, char **argv) {
   p_clModel->SetOutputPath(strOutputPath);
   p_clModel->SetSeriesNumber(iSeriesNumber);
   p_clModel->SetCompress(bCompress);
-  p_clModel->SetLambda(dLambda);
 
   if (bSaveADC && !p_clModel->SaveADC())
     std::cerr << "Warning: '" << strModel << "' model does not support saving ADC images." << std::endl;
@@ -1061,6 +1058,8 @@ bool MonoExponentialModel::Run() {
   if (!Good())
     return false;
 
+  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
+
   SolverType &clSolver = GetSolver();
 
   vnl_vector<long> clBoundSelection(ADVarType::GetNumIndependents(), 0); // By default, not constrained
@@ -1105,7 +1104,8 @@ void MonoExponentialModel::compute(const vnl_vector<double> &clX, double *p_dF, 
     clLoss += pow(-stPair.first * clD - stPair.second, 2);
   }
 
-  clLoss += pow(-(GetTargetBValue() - MinBValue()) * clD - clLogS, 2);
+  if (!m_p_clBValueImage)
+    clLoss += pow(-(GetTargetBValue() - MinBValue()) * clD - clLogS, 2);
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
@@ -1128,6 +1128,9 @@ double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clADCImage.IsNotNull())
     m_p_clADCImage->SetPixel(clIndex, FloatImageType::PixelType(clX[0]));
 
+  if (m_p_clBValueImage.IsNotNull())
+    return (double)m_p_clBValueImage->GetPixel(clIndex);
+
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
   return (double)b0 * std::exp(clX[1]);
@@ -1145,6 +1148,8 @@ bool IVIMModel::Run() {
     std::cerr << "Error: IVIM model needs B0 image." << std::endl;
     return false;
   }
+
+  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1205,7 +1210,8 @@ void IVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<
     clLoss += pow(clLogF - stPair.first * clD - stPair.second, 2);
   }
 
-  clLoss += pow(clLogF - GetTargetBValue() * clD - clLogS, 2);
+  if (!m_p_clBValueImage)
+    clLoss += pow(clLogF - GetTargetBValue() * clD - clLogS, 2);
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
@@ -1232,6 +1238,9 @@ double IVIMModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clPerfusionImage.IsNotNull())
     m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
 
+  if (m_p_clBValueImage.IsNotNull())
+    return (double)m_p_clBValueImage->GetPixel(clIndex);
+
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
   return (double)b0 * std::exp(clX[1]);
@@ -1249,6 +1258,8 @@ bool DKModel::Run() {
     std::cerr << "Error: DK model needs B0 image." << std::endl;
     return false;
   }
+
+  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1310,10 +1321,10 @@ void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<do
     clLoss += pow(-clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
   }
 
-  ADVarType clBD = GetTargetBValue() * clD;
-  clLoss += pow(-clBD - clLogS + clK * clBD * clBD / 6.0, 2);
-  //clLoss += GetLambda()*pow(clK, 2); // Another hack, possibly to prevent ambiguous solutions with the quadratic (could be two roots for D)
-  //clLoss += GetLambda()*pow(clD, 2);
+  if (!m_p_clBValueImage) {
+    ADVarType clBD = GetTargetBValue() * clD;
+    clLoss += pow(-clBD - clLogS + clK * clBD * clBD / 6.0, 2);
+  }
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
@@ -1340,6 +1351,9 @@ double DKModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clKurtosisImage.IsNotNull())
     m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[2]));
 
+  if (m_p_clBValueImage.IsNotNull())
+    return (double)m_p_clBValueImage->GetPixel(clIndex);
+
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
   return (double)b0 * std::exp(clX[1]);
@@ -1357,6 +1371,8 @@ bool DKIVIMModel::Run() {
     std::cerr << "Error: DK+IVIM model needs B0 image." << std::endl;
     return false;
   }
+
+  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1433,11 +1449,10 @@ void DKIVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vecto
     clLoss += pow(clLogF - clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
   }
 
-  ADVarType clBD = GetTargetBValue() * clD;
-  clLoss += pow(clLogF - clBD - clLogS + clK * clBD * clBD / 6.0, 2);
-
-  // These two terms compete to essentially cancel each other out... So these penalties try to prevent them from growing uncontrollably
-  //clLoss += GetLambda()*pow(clK, 2); // This works too... and slightly faster
+  if (!m_p_clBValueImage) {
+    ADVarType clBD = GetTargetBValue() * clD;
+    clLoss += pow(clLogF - clBD - clLogS + clK * clBD * clBD / 6.0, 2);
+  }
 
   if (p_dF != nullptr)
     *p_dF = clLoss.Value();
@@ -1467,6 +1482,9 @@ double DKIVIMModel::Solve(const itk::Index<3> &clIndex) {
 
   if (m_p_clKurtosisImage.IsNotNull())
     m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3]));
+
+  if (m_p_clBValueImage.IsNotNull())
+    return (double)m_p_clBValueImage->GetPixel(clIndex);
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
