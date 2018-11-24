@@ -934,7 +934,7 @@ bool BValueModel::SaveImage<float>(itk::Image<float, 3>::Pointer p_clImage, cons
       constexpr const double dMinValue = std::numeric_limits<ImageType::PixelType>::min();
       constexpr const double dMaxValue = std::numeric_limits<ImageType::PixelType>::max();
 
-      return ImageType::PixelType(std::min(dMaxValue, std::max(dMinValue, std::round(1e4*fPixel))));
+      return ImageType::PixelType(std::min(dMaxValue, std::max(dMinValue, std::round(1e3*fPixel))));
     });
 
   return SaveImage<ImageType::PixelType>(p_clIntImage, strPath, iSeriesNumber, strSeriesDescription);
