@@ -835,7 +835,7 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
 }
 
 ///////////////////////////////////////////////////////////////////////
-// BValueModel funcrions
+// BValueModel functions
 ///////////////////////////////////////////////////////////////////////
 
 template<typename PixelType>
@@ -1313,7 +1313,7 @@ bool DKModel::SaveImages() const {
 void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clK(clX[2], 2), clLoss(0.0);
 
-  for (auto &stPair : GetLogIntensities()) {      
+  for (auto &stPair : GetLogIntensities()) {
     ADVarType clBD = stPair.first * clD;
     clLoss += pow(-clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
   }

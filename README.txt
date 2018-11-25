@@ -63,7 +63,7 @@ b value diffusion-weighted imaging in prostate cancer."
 Abdominal imaging 40.3 (2015): 578-586.
 
 The source code is partly based on SortDicomFiles and 
-StandardizeBValues from which this README is also partly based.
+StandardizeBValue from which this README is also partly based.
 https://github.com/nslay/SortDicomFiles
 https://github.com/nslay/StandardizeBValue
 

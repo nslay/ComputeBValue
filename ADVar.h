@@ -51,19 +51,19 @@ public:
     m_gradient.fill(RealType());
   }
 
-  ADVar(const RealType &value, unsigned int uiIndex)
+  ADVar(const RealType &value, unsigned int uiIndex, const RealType &dvalue = RealType(1))
   : m_value(value) {
     m_gradient.fill(RealType());
-    m_gradient[uiIndex] = RealType(1);
+    m_gradient[uiIndex] = dvalue;
   }
 
   ADVar(const ADVar &) = default;
   ADVar(ADVar &&) = default;
 
-  void SetIndependent(const RealType &value, unsigned int uiIndex) {
+  void SetIndependent(const RealType &value, unsigned int uiIndex, const RealType &dvalue = RealType(1)) {
     m_value = value;
     m_gradient.fill(RealType());
-    m_gradient[uiIndex] = RealType(1);
+    m_gradient[uiIndex] = dvalue;
   }
 
   void SetConstant(const RealType &value) {
