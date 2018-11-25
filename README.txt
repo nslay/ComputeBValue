@@ -106,7 +106,7 @@ ComputeBValue accepts one or more given DICOM folders or DICOM files.
 DICOM files are used to deduce the folder and series UID of the DICOM
 series.
 
-As a quick start example
+As a quickstart example
 
 ComputeBValue -b 1500 mono C:\Path\To\6-ep2ddifftraDYNDIST-03788
 
@@ -167,7 +167,7 @@ have _Perfusion appended.
 #######################################################################
 # Models                                                              #
 #######################################################################
-This section briefly describes the how the models are implemented. All
+This section briefly describes how the models are implemented. All
 models solve a least-squares minimization problem of the form:
 
 \ell(\theta) = \sum_{b \in B} (f(\theta) - \log(S_b/S_0))^2
@@ -181,7 +181,6 @@ The models are discussed in more detail in the following paper:
 Grant, Kinzya B., et al. "Comparison of calculated and acquired high 
 b value diffusion-weighted imaging in prostate cancer." 
 Abdominal imaging 40.3 (2015): 578-586.
-
 
 # Mono Exponential
 The mono exponential model relates S_b and D through the expression:
@@ -243,7 +242,6 @@ the mono exponential model is used to calculate it.
 
 NOTE: Depending on your images and assumptions, some of these models 
 may be inappropriate!
-
 
 #######################################################################
 # Building from Source                                                #
