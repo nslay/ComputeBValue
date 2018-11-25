@@ -193,7 +193,7 @@ f(\theta) = -bD
 
 NOTE: This model can cope with the absence of S_0 using a mathematical
 trick. In this model, the ratio of two b-value image intensities is
-S_a / S_b = exp(-(a-b)D)
+(S_a / S_0) / (S_b / S_0) = exp(-(a-b)D)
 
 With some rearrangement we have:
 
