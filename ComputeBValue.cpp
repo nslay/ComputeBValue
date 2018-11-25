@@ -178,11 +178,6 @@ protected:
   template<typename PixelType>
   bool SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const;
 
-  // As of 4.13, ITK does not support outputing float/double DICOM
-  // Work around ITK limitation for DICOM while allowing us to save floating point for MHA and other non-DICOM formats
-  template<>
-  bool SaveImage<float>(itk::Image<float, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const;
-
   // ADC is normally stored in DICOM and other medical image formats as short... but we store it in float inernally. This just cuts down on some code...
   bool SaveADCImage(itk::Image<float, 3>::Pointer p_clADCImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const;
 
@@ -848,18 +843,18 @@ typename itk::Image<PixelType, 3>::Pointer BValueModel::NewImage() const {
   typedef itk::Image<PixelType, 3> OtherImageType;
 
   if (m_mImagesByBValue.empty() || !m_mImagesByBValue.begin()->second)
-    return OtherImageType::Pointer();
+    return typename OtherImageType::Pointer();
 
   ImageType::Pointer p_clRefImage = m_mImagesByBValue.begin()->second;
 
-  OtherImageType::Pointer p_clImage = OtherImageType::New();
+  typename OtherImageType::Pointer p_clImage = OtherImageType::New();
   p_clImage->SetRegions(p_clRefImage->GetBufferedRegion());
   p_clImage->SetSpacing(p_clRefImage->GetSpacing());
   p_clImage->SetOrigin(p_clRefImage->GetOrigin());
   p_clImage->SetDirection(p_clRefImage->GetDirection());
 
   p_clImage->Allocate();
-  p_clImage->FillBuffer(OtherImageType::PixelType());    
+  p_clImage->FillBuffer(typename OtherImageType::PixelType());    
 
   return p_clImage;
 }
@@ -876,7 +871,7 @@ bool BValueModel::ComputeB0Image() {
   clModel.SetImages(GetImages());
   clModel.SetTargetBValue(0.0);
 
-  std::cout << "Info: No B0 image present. Precomputing B0 image ..." << std::endl;
+  std::cout << "Info: No b-0 image present. Precomputing b-0 image ..." << std::endl;
 
   if (!clModel.Run())
     return false;
@@ -921,6 +916,8 @@ bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage
   return SaveDicomImage<PixelType, 3>(p_clImage, strPath, GetCompress());
 }
 
+// As of 4.13, ITK does not support outputing float/double DICOM
+// Work around ITK limitation for DICOM while allowing us to save floating point for MHA and other non-DICOM formats
 template<>
 bool BValueModel::SaveImage<float>(itk::Image<float, 3>::Pointer p_clImage, const std::string &strPath, int iSeriesNumber, const std::string &strSeriesDescription) const {
   if (GetExtension(strPath).size() > 0)

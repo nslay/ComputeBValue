@@ -281,8 +281,10 @@ Unix-like systems:
 
 ComputeBValue has been successfully built and tested with:
 Microsoft Visual Studio 2017 on Windows 10 Professional
+Clang 6.0.1 on FreeBSD 11.2-STABLE
 
 using ITK versions:
+ITK 4.9
 ITK 4.13
 
 #######################################################################
