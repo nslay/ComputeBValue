@@ -148,6 +148,10 @@ public:
     return StripExtension(GetOutputPath()) + strPrefix + strExtension;
   }
 
+  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
+  std::string GetPerfusionOutputPath() const { return GetOutputPathWithPrefix("_Perfusion"); }
+  std::string GetKurtosisOutputPath() const { return GetOutputPathWithPrefix("_Kurtosis"); }
+
   virtual bool SetImages(const ImageMapType &mImagesByBValue) {
     m_mImagesByBValue = mImagesByBValue;
     return m_mImagesByBValue.size() > 0;
@@ -160,10 +164,14 @@ public:
   void SetSeriesNumber(int iSeriesNumber) { m_iSeriesNumber = iSeriesNumber; }
   int GetSeriesNumber() const { return m_iSeriesNumber; }
 
+  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
+  int GetPerfusionSeriesNumber() const { return GetSeriesNumber()+2; }
+  int GetKurtosisSeriesNumber() const { return GetSeriesNumber()+3; }
+
   virtual bool Run();
   virtual bool SaveImages() const;
 
-  ImageType::Pointer GetBValueImage() const { return m_p_clBValueImage; }
+  ImageType::Pointer GetOutputBValueImage() const { return m_p_clBValueImage; }
 
 protected:
   BValueModel(int iNumberOfUnknowns)
@@ -235,24 +243,20 @@ public:
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
 
-  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
-
   virtual bool Run() override;
   virtual bool SaveImages() const override;
 
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
-  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
-
-  FloatImageType::Pointer GetADCImage() const { return m_p_clADCImage; }
+  FloatImageType::Pointer GetOutputADCImage() const { return m_p_clADCImage; }
 
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
 
 private:
   bool m_bSaveADC = false;
-  ImageType::Pointer m_p_clBValueImage; // In case we already have it
+  ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
 };
 
@@ -272,20 +276,14 @@ public:
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
 
-  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
-  std::string GetPerfusionOutputPath() const { return GetOutputPathWithPrefix("_Perfusion"); }
-
   virtual bool Run() override;
   virtual bool SaveImages() const override;
 
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
-  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
-  int GetPerfusionSeriesNumber() const { return GetSeriesNumber()+2; }
-
-  FloatImageType::Pointer GetADCImage() const { return m_p_clADCImage; }
-  FloatImageType::Pointer GetPerfusionImage() const { return m_p_clPerfusionImage; }
+  FloatImageType::Pointer GetOutputADCImage() const { return m_p_clADCImage; }
+  FloatImageType::Pointer GetOutputPerfusionImage() const { return m_p_clPerfusionImage; }
 
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
@@ -293,7 +291,7 @@ protected:
 private:
   bool m_bSaveADC = false;
   bool m_bSavePerfusion = false;
-  ImageType::Pointer m_p_clBValueImage; // In case we already have it
+  ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
 };
@@ -314,20 +312,14 @@ public:
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SaveKurtosis() override { return m_bSaveKurtosis = true; }
 
-  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
-  std::string GetKurtosisOutputPath() const { return GetOutputPathWithPrefix("_Kurtosis"); }
-
   virtual bool Run() override;
   virtual bool SaveImages() const override;
 
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
-  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
-  int GetKurtosisSeriesNumber() const { return GetSeriesNumber()+3; }
-
-  FloatImageType::Pointer GetADCImage() const { return m_p_clADCImage; }
-  FloatImageType::Pointer GetKurtosisImage() const { return m_p_clKurtosisImage; }
+  FloatImageType::Pointer GetOutputADCImage() const { return m_p_clADCImage; }
+  FloatImageType::Pointer GetOutputKurtosisImage() const { return m_p_clKurtosisImage; }
 
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
@@ -335,7 +327,7 @@ protected:
 private:
   bool m_bSaveADC = false;
   bool m_bSaveKurtosis = false;
-  ImageType::Pointer m_p_clBValueImage; // In case we already have it
+  ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
 };
@@ -357,23 +349,15 @@ public:
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
   virtual bool SaveKurtosis() override { return m_bSaveKurtosis = true; }
 
-  std::string GetADCOutputPath() const { return GetOutputPathWithPrefix("_ADC"); }
-  std::string GetPerfusionOutputPath() const { return GetOutputPathWithPrefix("_Perfusion"); }
-  std::string GetKurtosisOutputPath() const { return GetOutputPathWithPrefix("_Kurtosis"); }
-
   virtual bool Run() override;
   virtual bool SaveImages() const override;
 
   // Since we use automatic differentiation, let's do both operations simultaneously...
   virtual void compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) override;
 
-  int GetADCSeriesNumber() const { return GetSeriesNumber()+1; }
-  int GetPerfusionSeriesNumber() const { return GetSeriesNumber()+2; }
-  int GetKurtosisSeriesNumber() const { return GetSeriesNumber()+3; }
-
-  FloatImageType::Pointer GetADCImage() const { return m_p_clADCImage; }
-  FloatImageType::Pointer GetKurtosisImage() const { return m_p_clKurtosisImage; }
-  FloatImageType::Pointer GetPerfusionImage() const { return m_p_clPerfusionImage; }
+  FloatImageType::Pointer GetOutputADCImage() const { return m_p_clADCImage; }
+  FloatImageType::Pointer GetOutputKurtosisImage() const { return m_p_clKurtosisImage; }
+  FloatImageType::Pointer GetOutputPerfusionImage() const { return m_p_clPerfusionImage; }
 
 protected:
   virtual double Solve(const itk::Index<3> &clIndex) override;
@@ -382,7 +366,7 @@ private:
   bool m_bSaveADC = false;
   bool m_bSavePerfusion = false;
   bool m_bSaveKurtosis = false;
-  ImageType::Pointer m_p_clBValueImage; // In case we already have it
+  ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
@@ -876,7 +860,7 @@ bool BValueModel::ComputeB0Image() {
   if (!clModel.Run())
     return false;
 
-  ImageType::Pointer p_clB0Image = clModel.GetBValueImage();
+  ImageType::Pointer p_clB0Image = clModel.GetOutputBValueImage();
 
   itk::MetaDataDictionary clDicomTags = GetImages().begin()->second->GetMetaDataDictionary();
   EncapsulateStringMetaData(clDicomTags, "0018|9087", 0.0);
@@ -923,7 +907,7 @@ bool BValueModel::SaveImage<float>(itk::Image<float, 3>::Pointer p_clImage, cons
   if (GetExtension(strPath).size() > 0)
     return ::SaveImg<float, 3>(p_clImage, strPath, GetCompress()); // Has an extension, it's a file
 
-  // Otherwise, make into an integer volume and scale by 1e4
+  // Otherwise, make into an integer volume and scale by 1e3
   ImageType::Pointer p_clIntImage = NewImage<ImageType::PixelType>();
 
   std::transform(p_clImage->GetBufferPointer(), p_clImage->GetBufferPointer() + p_clImage->GetBufferedRegion().GetNumberOfPixels(), p_clIntImage->GetBufferPointer(),
@@ -1055,7 +1039,7 @@ bool MonoExponentialModel::Run() {
   if (!Good())
     return false;
 
-  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
+  m_p_clTargetBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1101,7 +1085,8 @@ void MonoExponentialModel::compute(const vnl_vector<double> &clX, double *p_dF, 
     clLoss += pow(-stPair.first * clD - stPair.second, 2);
   }
 
-  if (!m_p_clBValueImage)
+  // Do we already have the target b-value image? No reason to compute it again!
+  if (!m_p_clTargetBValueImage)
     clLoss += pow(-(GetTargetBValue() - MinBValue()) * clD - clLogS, 2);
 
   if (p_dF != nullptr)
@@ -1125,8 +1110,8 @@ double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clADCImage.IsNotNull())
     m_p_clADCImage->SetPixel(clIndex, FloatImageType::PixelType(clX[0]));
 
-  if (m_p_clBValueImage.IsNotNull())
-    return (double)m_p_clBValueImage->GetPixel(clIndex);
+  if (m_p_clTargetBValueImage.IsNotNull())
+    return (double)m_p_clTargetBValueImage->GetPixel(clIndex);
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
@@ -1146,7 +1131,7 @@ bool IVIMModel::Run() {
     return false;
   }
 
-  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
+  m_p_clTargetBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1207,7 +1192,8 @@ void IVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<
     clLoss += pow(clLogF - stPair.first * clD - stPair.second, 2);
   }
 
-  if (!m_p_clBValueImage)
+  // Do we already have the target b-value image? No reason to compute it again!
+  if (!m_p_clTargetBValueImage)
     clLoss += pow(clLogF - GetTargetBValue() * clD - clLogS, 2);
 
   if (p_dF != nullptr)
@@ -1235,8 +1221,8 @@ double IVIMModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clPerfusionImage.IsNotNull())
     m_p_clPerfusionImage->SetPixel(clIndex, FloatImageType::PixelType(1.0 - std::exp(clX[2])));
 
-  if (m_p_clBValueImage.IsNotNull())
-    return (double)m_p_clBValueImage->GetPixel(clIndex);
+  if (m_p_clTargetBValueImage.IsNotNull())
+    return (double)m_p_clTargetBValueImage->GetPixel(clIndex);
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
@@ -1256,7 +1242,7 @@ bool DKModel::Run() {
     return false;
   }
 
-  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
+  m_p_clTargetBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1318,7 +1304,8 @@ void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<do
     clLoss += pow(-clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
   }
 
-  if (!m_p_clBValueImage) {
+  // Do we already have the target b-value image? No reason to compute it again!
+  if (!m_p_clTargetBValueImage) {
     ADVarType clBD = GetTargetBValue() * clD;
     clLoss += pow(-clBD - clLogS + clK * clBD * clBD / 6.0, 2);
   }
@@ -1348,8 +1335,8 @@ double DKModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clKurtosisImage.IsNotNull())
     m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[2]));
 
-  if (m_p_clBValueImage.IsNotNull())
-    return (double)m_p_clBValueImage->GetPixel(clIndex);
+  if (m_p_clTargetBValueImage.IsNotNull())
+    return (double)m_p_clTargetBValueImage->GetPixel(clIndex);
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 
@@ -1369,7 +1356,7 @@ bool DKIVIMModel::Run() {
     return false;
   }
 
-  m_p_clBValueImage = GetBValueImage(GetTargetBValue());
+  m_p_clTargetBValueImage = GetBValueImage(GetTargetBValue());
 
   SolverType &clSolver = GetSolver();
 
@@ -1446,7 +1433,8 @@ void DKIVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vecto
     clLoss += pow(clLogF - clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
   }
 
-  if (!m_p_clBValueImage) {
+  // Do we already have the target b-value image? No reason to compute it again!
+  if (!m_p_clTargetBValueImage) {
     ADVarType clBD = GetTargetBValue() * clD;
     clLoss += pow(clLogF - clBD - clLogS + clK * clBD * clBD / 6.0, 2);
   }
@@ -1480,8 +1468,8 @@ double DKIVIMModel::Solve(const itk::Index<3> &clIndex) {
   if (m_p_clKurtosisImage.IsNotNull())
     m_p_clKurtosisImage->SetPixel(clIndex, FloatImageType::PixelType(clX[3]));
 
-  if (m_p_clBValueImage.IsNotNull())
-    return (double)m_p_clBValueImage->GetPixel(clIndex);
+  if (m_p_clTargetBValueImage.IsNotNull())
+    return (double)m_p_clTargetBValueImage->GetPixel(clIndex);
 
   const ImageType::PixelType &b0 = GetImages().begin()->second->GetPixel(clIndex);
 

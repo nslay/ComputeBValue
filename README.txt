@@ -142,6 +142,13 @@ series number for the calculated b-value image (-n). By default, the
 series number is 13701 for the calculated b-value image. Other images 
 share a similar series number offset by values of 1-3 (e.g. 13702-4).
 
+As a special note, the perfusion fraction and kurtosis images are
+stored in non-DICOM medical images in floating point form. However,
+owing to limitations with ITK, perfusion and kurtosis image pixel
+values are scaled by 1000 and stored as integer values in DICOM. Both
+b-value and ADC images are unaffected and remain stored as integer
+values in both DICOM and non-DICOM formats.
+
 Lastly, ComputeBValue provides the below usage message when
 provided with the -h flag or no arguments. It's useful if you
 forget.
