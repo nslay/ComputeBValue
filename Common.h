@@ -48,8 +48,10 @@
 #include <cstdint>
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 #include <type_traits>
 
@@ -144,6 +146,12 @@ void EncapsulateStringMetaData<itk::Point<double, 3>>(itk::MetaDataDictionary &c
 template<>
 void EncapsulateStringMetaData<itk::Point<double, 2>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Point<double, 2> &clPoint);
 
+template<>
+void EncapsulateStringMetaData<itk::Matrix<float, 3, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Matrix<float, 3, 3> &value);
+
+template<>
+void EncapsulateStringMetaData<itk::Matrix<double, 3, 3>>(itk::MetaDataDictionary &clTags, const std::string &strKey, const itk::Matrix<double, 3, 3> &value);
+
 template<typename ValueType>
 bool ExposeCSAMetaData(gdcm::CSAHeader &clHeader, const std::string &strKey, ValueType &value);
 
@@ -160,6 +168,7 @@ bool GetOrigin(const itk::MetaDataDictionary &clDicomTags, vnl_vector_fixed<Real
 void SanitizeFileName(std::string &strFileName); // Does NOT operate on paths
 void FindFiles(const char *p_cDir, const char *p_cPattern, std::vector<std::string> &vFiles, bool bRecursive = false);
 void FindFolders(const char *p_cDir, const char *p_cPattern, std::vector<std::string> &vFolders, bool bRecursive = false);
+void FindDicomFiles(const char *p_cDir, const char *p_cPattern, std::vector<std::string> &vFiles, bool bRecursive = false);
 void FindDicomFolders(const char *p_cDir, const char *p_cPattern, std::vector<std::string> &vFolders, bool bRecursive = false);
 
 // Use LoadImg since Windows #defines LoadImage ... lame
@@ -167,15 +176,15 @@ template<typename PixelType, unsigned int Dimension>
 typename itk::Image<PixelType, Dimension>::Pointer LoadImg(const std::string &strPath);
 
 template<typename PixelType, unsigned int Dimension>
-bool SaveImg(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress = true);
+bool SaveImg(const itk::Image<PixelType, Dimension> *p_clImage, const std::string &strPath, bool bCompress = true);
 
 // Append a singleton dimension and possibly set relevant 3D information for DICOM
 template<typename PixelType>
-typename itk::Image<PixelType, 3>::Pointer PromoteSlice(typename itk::Image<PixelType, 2>::Pointer p_clSlice, bool bDeepCopy = false);
+typename itk::Image<PixelType, 3>::Pointer PromoteSlice(itk::Image<PixelType, 2> *p_clSlice, bool bDeepCopy = false);
 
 // Save a DICOM slice and keep all UIDs and private tags
 template<typename PixelType>
-bool SaveDicomSlice(typename itk::Image<PixelType, 2>::Pointer p_clImage, const std::string &strPath, bool bCompress = false);
+bool SaveDicomSlice(itk::Image<PixelType, 2> *p_clImage, const std::string &strPath, bool bCompress = false);
 
 template<typename PixelType, unsigned int Dimension>
 typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::string &strPath, const std::string &strSeriesUID = std::string());
@@ -183,7 +192,7 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::str
 // The p_clImage must have a template MetaDataDictionary from a valid DICOM already set!
 // NOTE: You are responsible for setting the series number 0020|0011 and series description 0008|103e as well as any other custom tags!
 template<typename PixelType, unsigned int Dimension>
-bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress = false);
+bool SaveDicomImage(itk::Image<PixelType, Dimension> *p_clImage, const std::string &strPath, bool bCompress = false);
 
 template<typename ValueType>
 ValueType FromString(const std::string &strValue, const ValueType &failValue) {
@@ -333,7 +342,7 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadImg(const std::string &st
 }
 
 template<typename PixelType, unsigned int Dimension>
-bool SaveImg(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress) {
+bool SaveImg(const itk::Image<PixelType, Dimension> *p_clImage, const std::string &strPath, bool bCompress) {
   typedef itk::Image<PixelType, Dimension> ImageType;
   typedef itk::ImageFileWriter<ImageType> WriterType;
 
@@ -355,7 +364,7 @@ bool SaveImg(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const
 }
 
 template<typename PixelType>
-typename itk::Image<PixelType, 3>::Pointer PromoteSlice(typename itk::Image<PixelType, 2>::Pointer p_clSlice, bool bDeepCopy) {
+typename itk::Image<PixelType, 3>::Pointer PromoteSlice(itk::Image<PixelType, 2> *p_clSlice, bool bDeepCopy) {
   typedef itk::Image<PixelType, 2> ImageType;
   typedef itk::Image<PixelType, 3> ImageType3D;
   typedef typename ImageType::SizeType SizeType;
@@ -452,7 +461,7 @@ typename itk::Image<PixelType, 3>::Pointer PromoteSlice(typename itk::Image<Pixe
 }
 
 template<typename PixelType>
-bool SaveDicomSlice(typename itk::Image<PixelType, 2>::Pointer p_clSlice, const std::string &strFileName, bool bCompress) {
+bool SaveDicomSlice(itk::Image<PixelType, 2> *p_clSlice, const std::string &strFileName, bool bCompress) {
   typedef itk::Image<PixelType, 2> ImageType;
   typedef itk::Image<PixelType, 3> ImageType3D;
   typedef itk::GDCMImageIO ImageIOType;
@@ -545,7 +554,10 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::str
       return typename ImageType::Pointer();
     }
 
-    return p_clReader->GetOutput();
+    typename itk::Image<PixelType, Dimension>::Pointer p_clImage = p_clReader->GetOutput();
+    p_clImage->SetMetaDataDictionary(p_clImageIO->GetMetaDataDictionary());
+
+    return p_clImage;
   }
 
   // Passed a file, read the series UID (ignore the one provided, if any)
@@ -613,7 +625,11 @@ typename itk::Image<PixelType, Dimension>::Pointer LoadDicomImage(const std::str
     return typename ImageType::Pointer();
   }
 
-  return p_clReader->GetOutput();
+  typename itk::Image<PixelType, Dimension>::Pointer p_clImage = p_clReader->GetOutput();
+  p_clImage->SetMetaDataDictionary(p_clImageIO->GetMetaDataDictionary());
+
+  return p_clImage;
+  //return p_clReader->GetOutput();
 }
 
 // For flexible support of 0028|0106 and 0028|0107
@@ -670,7 +686,7 @@ template<>
 bool SetDicomPixelInformation<itk::RGBAPixel<uint8_t>>(itk::MetaDataDictionary &clTags);
 
 template<typename PixelType, unsigned int Dimension>
-bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage, const std::string &strPath, bool bCompress) {
+bool SaveDicomImage(itk::Image<PixelType, Dimension> *p_clImage, const std::string &strPath, bool bCompress) {
   typedef itk::GDCMImageIO ImageIOType;
   typedef itk::Image<PixelType, Dimension> ImageType;
   typedef itk::Image<PixelType, 3> VolumeType;
@@ -685,9 +701,8 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
   if (!p_clImage || !SetDicomPixelInformation<PixelType>(p_clImage->GetMetaDataDictionary()))
     return false;
 
-  // NOTE: We can get away with such trickery since the reference count is managed by the object itself (and not the itk::SmartPointer wrapping it)
   if (Dimension == 2)
-    return SaveDicomSlice<PixelType>((SliceType *)p_clImage.GetPointer(), strPath, bCompress); // Cast to prevent compiler error... we NEVER reach this in 3D anyway
+    return SaveDicomSlice<PixelType>((SliceType *)p_clImage, strPath, bCompress); // Cast to prevent compiler error... we NEVER reach this in 3D anyway
 
   itk::MetaDataDictionary clRefTags = p_clImage->GetMetaDataDictionary();
 
@@ -712,10 +727,10 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
     strNewSeriesUID = clGenUID.Generate();
   }
 
-  DictionaryArrayType clDictionaryArray;
+  std::vector<std::unique_ptr<itk::MetaDataDictionary>> vDictionaries;
 
-  for (itk::IndexValueType z = 0; z < clSize[2]; ++z) {
-    DictionaryRawPointer p_clNewTags = new itk::MetaDataDictionary();
+  for (itk::IndexValueType z = 0; itk::SizeValueType(z) < clSize[2]; ++z) {
+    std::unique_ptr<itk::MetaDataDictionary> p_clNewTags = std::make_unique<itk::MetaDataDictionary>();
 
     CopyStringMetaData(*p_clNewTags, clRefTags);
 
@@ -750,6 +765,8 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
     EncapsulateStringMetaData(*p_clNewTags, "0018|0050", clSpacing[2]);
     EncapsulateStringMetaData(*p_clNewTags, "0018|0088", clSpacing[2]);
 
+    EncapsulateStringMetaData(*p_clNewTags, "0020|0037", clDirection);
+
     const PixelType * const p_begin = p_clImage->GetBufferPointer() + (z*clSize[0]*clSize[1]);
     const PixelType * const p_end = p_begin + (clSize[0]*clSize[1]);
 
@@ -764,8 +781,15 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
       p_clNewTags->Erase("0028|0107");
     }
 
-    clDictionaryArray.push_back(p_clNewTags);
+    vDictionaries.emplace_back(std::move(p_clNewTags));
   }
+
+  DictionaryArrayType clDictionaryArray(vDictionaries.size(), nullptr);
+
+  std::transform(vDictionaries.begin(), vDictionaries.end(), clDictionaryArray.begin(),
+    [](const std::unique_ptr<itk::MetaDataDictionary> &p_clTags) -> DictionaryRawPointer {
+      return p_clTags.get();
+    });
 
   MkDir(strPath);
 
@@ -791,7 +815,7 @@ bool SaveDicomImage(typename itk::Image<PixelType, Dimension>::Pointer p_clImage
   p_clWriter->SetMetaDataDictionaryArray(&clDictionaryArray);
   p_clWriter->SetUseCompression(bCompress);
 
-  p_clWriter->SetInput((const VolumeType *)p_clImage.GetPointer()); // Cast to prevent compiler error ... we NEVER reach this in 2D anyway
+  p_clWriter->SetInput((const VolumeType *)p_clImage); // Cast to prevent compiler error ... we NEVER reach this in 2D anyway
 
   try {
     p_clWriter->Update();
