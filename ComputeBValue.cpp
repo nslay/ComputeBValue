@@ -888,6 +888,11 @@ bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage
   clDicomTags.Erase("0028|1051"); // Window width
   clDicomTags.Erase("0028|1055"); // Window width/center explanation
 
+  // XXX: Prevent ITK from inverting a transform when saving... potentially causing loss of information in pixel intensity!
+  EncapsulateStringMetaData(clDicomTags, "0028|1052", 0.0); // Intercept
+  EncapsulateStringMetaData(clDicomTags, "0028|1053", 1.0); // Slope
+  EncapsulateStringMetaData(clDicomTags, "0028|1054", std::string("US")); // US - "Unspecified"
+
   EncapsulateStringMetaData(clDicomTags, "0018|9087", GetTargetBValue());
   EncapsulateStringMetaData(clDicomTags, "0020|0011", iSeriesNumber);
   EncapsulateStringMetaData(clDicomTags, "0008|103e", strSeriesDescription);
