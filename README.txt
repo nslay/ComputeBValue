@@ -138,7 +138,7 @@ B1500Image/
 You may also manually provide the bvalue of any medical image by 
 appending, ":bvalue", to the end of the path. For example:
 
-ComputeBValue -b 1500 -o B1500Image C:\Path\To\b50.nii.gz:50 
+ComputeBValue -b 1500 -o B1500Image mono C:\Path\To\b50.nii.gz:50 
   C:\Path\To\b400.nii.gz:400 C:\Path\To\b800.nii.gz:800
   
 This example reads B50, B400 and B800 images from NIFTI files.
