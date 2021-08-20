@@ -936,7 +936,18 @@ bool BValueModel::SaveImage(typename itk::Image<PixelType, 3>::Pointer p_clImage
   if (GetExtension(strPath).size() > 0)
     return ::SaveImg<PixelType, 3>(p_clImage, strPath, GetCompress()); // Has an extension, it's a file
 
-  itk::MetaDataDictionary clDicomTags = GetImages().begin()->second->GetMetaDataDictionary();
+  // Find an image with DICOM tags
+  auto itr = std::find_if(GetImages().begin(), GetImages().end(),
+    [](const auto &stPair) -> bool {
+      return stPair.second->GetMetaDataDictionary().HasKey("0020|000e"); // Series UID
+    });
+
+  if (itr == GetImages().end()) {
+    std::cerr << "Error: Cannot save DICOM from non-DICOM image." << std::endl;
+    return false;
+  }
+
+  itk::MetaDataDictionary clDicomTags = itr->second->GetMetaDataDictionary();
 
   clDicomTags.Erase("0028|1050"); // Window center
   clDicomTags.Erase("0028|1051"); // Window width
