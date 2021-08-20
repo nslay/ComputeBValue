@@ -69,7 +69,7 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 [diffusionFolder2|diffusionFile2 ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;
@@ -81,6 +81,9 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
   exit(1);
 }
+
+// Process path/to/file:bvalue hint
+std::pair<std::string, double> GetBValueHint(const std::string &strPath);
 
 // Change name from ComputeDiffusionBValue* to GetDiffusionBValue* (since this program actually calculates B value images!)
 double GetDiffusionBValue(const itk::MetaDataDictionary &clDicomTags);
@@ -499,6 +502,30 @@ int main(int argc, char **argv) {
   return 0;
 }
 
+std::pair<std::string, double> GetBValueHint(const std::string &strPath) {
+  size_t p = strPath.find(':');
+
+  if (p == std::string::npos || p+1 >= strPath.size())
+    return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
+
+#ifdef _WIN32
+  size_t q = strPath.find_last_of("/\\");
+#else // !_WIN32
+  size_t q = strPath.find_last_of('/');
+#endif // _WIN32
+
+  if (q != std::string::npos && p < q)
+    return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
+
+  q = 0;
+  const double dBValue = std::stod(strPath.substr(p+1), &q);
+
+  if (p+1+q < strPath.size() || dBValue < 0.0)
+    return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
+  
+  return std::make_pair(strPath.substr(0,p), dBValue);
+}
+
 double GetDiffusionBValue(const itk::MetaDataDictionary &clDicomTags) {
   double dBValue = -1.0;
 
@@ -782,6 +809,33 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
   typedef itk::Image<PixelType, 3> ImageType;
   typedef std::map<double, typename ImageType::Pointer> MapType;
   typedef itk::ImageSeriesReader<ImageType> ReaderType;
+
+  auto stPathBValuePair = GetBValueHint(strPath);
+
+  if (stPathBValuePair.second >= 0.0) {
+    const std::string &strHintPath = stPathBValuePair.first;
+    const double dHintBValue = stPathBValuePair.second;
+
+    typename ImageType::Pointer p_clImage;
+
+    if (GetExtension(strHintPath).empty())
+      p_clImage = LoadDicomImage<PixelType, 3>(strHintPath, strSeriesUID);
+    else
+      p_clImage = LoadImg<PixelType, 3>(strHintPath);
+
+    if (!p_clImage) {
+      std::cerr << "Error: Could not load '" << strHintPath << "' (hinted b = " << dHintBValue << ")." << std::endl;
+      return MapType();
+    }
+
+    // Override the BValue
+    EncapsulateStringMetaData(p_clImage->GetMetaDataDictionary(), "0018|9087", dHintBValue);
+
+    MapType mImagesByBValue;
+    mImagesByBValue.emplace(dHintBValue, p_clImage);
+
+    return mImagesByBValue;
+  }
 
   auto mFilesByBalue = ComputeBValueFileNames(strPath, strSeriesUID);
 

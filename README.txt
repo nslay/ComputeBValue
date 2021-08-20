@@ -135,6 +135,18 @@ B1500Image/
 ...
 +-- 19.dcm
 
+You may also manually provide the bvalue of any medical image by 
+appending, ":bvalue", to the end of the path. For example:
+
+ComputeBValue -b 1500 -o B1500Image C:\Path\To\b50.nii.gz:50 
+  C:\Path\To\b400.nii.gz:400 C:\Path\To\b800.nii.gz:800
+  
+This example reads B50, B400 and B800 images from NIFTI files.
+  
+This is useful for non-DICOM medical image formats that lack the extra
+meta-data as well as for DICOMs with missing information or 
+undocumented vendor-specific tags for determining diffusion bvalue.
+
 There are additional flags for saving the calculated ADC (-a),
 perfusion fraction (-p), and kurtosis image (-k). You may additionally
 compress the output images (-c) as well as change the output DICOM 
@@ -154,8 +166,8 @@ provided with the -h flag or no arguments. It's useful if you
 forget.
 
 Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] 
--b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1 
-[diffusionFolder2|diffusionFile2 ...]
+-b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] 
+[diffusionFolder2|diffusionFile2[:bvalue] ...]
 
 Options:
 -a -- Save calculated ADC. The output path will have _ADC appended 
