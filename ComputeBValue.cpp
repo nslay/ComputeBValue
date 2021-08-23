@@ -503,24 +503,16 @@ int main(int argc, char **argv) {
 }
 
 std::pair<std::string, double> GetBValueHint(const std::string &strPath) {
-  size_t p = strPath.find(':');
+  size_t p = strPath.find_last_of(':');
 
   if (p == std::string::npos || p+1 >= strPath.size())
     return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
 
-#ifdef _WIN32
-  size_t q = strPath.find_last_of("/\\");
-#else // !_WIN32
-  size_t q = strPath.find_last_of('/');
-#endif // _WIN32
+  char *q = nullptr;
+  const std::string strTmp = strPath.substr(p+1).c_str();
+  const double dBValue = std::strtod(strTmp.c_str(), &q);
 
-  if (q != std::string::npos && p < q)
-    return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
-
-  q = 0;
-  const double dBValue = std::stod(strPath.substr(p+1), &q);
-
-  if (p+1+q < strPath.size() || dBValue < 0.0)
+  if (*q != '\0' || dBValue < 0.0)
     return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
   
   return std::make_pair(strPath.substr(0,p), dBValue);
