@@ -509,7 +509,7 @@ std::pair<std::string, double> GetBValueHint(const std::string &strPath) {
     return std::make_pair(strPath, -1.0); // Negative value indicates no bvalue hint
 
   char *q = nullptr;
-  const std::string strTmp = strPath.substr(p+1).c_str();
+  const std::string strTmp = strPath.substr(p+1);
   const double dBValue = std::strtod(strTmp.c_str(), &q);
 
   if (*q != '\0' || dBValue < 0.0)
