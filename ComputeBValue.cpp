@@ -496,7 +496,7 @@ int main(int argc, char **argv) {
 
   if (strADCImagePath.size() > 0) {
     ImageType::Pointer p_clADCImage;
-    if (GetExtension(strADCImagePath).empty())
+    if (IsFolder(strADCImagePath))
       p_clADCImage = LoadDicomImage<ImageType::PixelType, 3>(strADCImagePath);
     else
       p_clADCImage = LoadImg<ImageType::PixelType, 3>(strADCImagePath);
@@ -866,7 +866,7 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
 
     typename ImageType::Pointer p_clImage;
 
-    if (GetExtension(strHintPath).empty())
+    if (IsFolder(strHintPath))
       p_clImage = LoadDicomImage<PixelType, 3>(strHintPath, strSeriesUID);
     else
       p_clImage = LoadImg<PixelType, 3>(strHintPath);
