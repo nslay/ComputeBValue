@@ -509,7 +509,7 @@ int main(int argc, char **argv) {
     std::cout << "Info: Loaded ADC image." << std::endl;
 
     if (!p_clModel->SetADCImage(p_clADCImage))
-      std::cerr << "Error: Warning: '" << strModel << "' model does not support using existing ADC image." << std::endl;
+      std::cerr << "Warning: '" << strModel << "' model does not support using existing ADC image." << std::endl;
   }
 
   std::map<double, ImageType::Pointer> mImagesByBValue;
