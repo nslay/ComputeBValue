@@ -879,6 +879,8 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
     // Override the BValue
     EncapsulateStringMetaData(p_clImage->GetMetaDataDictionary(), "0018|9087", dHintBValue);
 
+    Uninvert(p_clImage.GetPointer()); // Try to "uninvert" this (nothing will happen if DICOM tags are missing).
+
     MapType mImagesByBValue;
     mImagesByBValue.emplace(dHintBValue, p_clImage);
 
@@ -957,8 +959,12 @@ void Uninvert(itk::Image<PixelType, 3> *p_clBValueImage) {
 
   PixelType * const p_buffer = p_clBValueImage->GetBufferPointer();
 
-  for (size_t i = 0; i < numPixels; ++i)
+  for (size_t i = 0; i < numPixels; ++i) {
+    if (p_buffer[i] < 0) // Not a b-value image
+      return;
+
     highCount += (p_buffer[i] > halfValue ? 1 : 0);
+  }
 
   // > 75%?
   if (4*highCount > 3*numPixels) {
