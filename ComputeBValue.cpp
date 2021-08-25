@@ -69,7 +69,7 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] [-A ADCImageFolder|ADCImageFile] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;

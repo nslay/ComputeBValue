@@ -168,7 +168,7 @@ Lastly, ComputeBValue provides the below usage message when
 provided with the -h flag or no arguments. It's useful if you
 forget.
 
-Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] 
+Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] [-A ADCImageFolder|ADCImageFile]
 -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] 
 [diffusionFolder2|diffusionFile2[:bvalue] ...]
 
