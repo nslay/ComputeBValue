@@ -45,15 +45,18 @@
 # Introduction                                                        #
 #######################################################################
 ComputeBValue is a tool that can calculate b-value images from one or 
-more given b-value images using one of four different models. These
-include: mono exponential, intravoxel incoherent motion (IVIM), 
-diffusion  kurtosis (DK), and a combined DK and IVIM model. It can read 
-vendor-specific formatted diffusion b-values from DICOM and can write 
-b-value, Apparent Diffusion Coefficient (ADC), kurtosis, and perfusion 
-fraction images to medical image formats like MetaIO as well as DICOM. 
-As diffusion MRI sequences are often interleaves with b-values, this 
-tool supports extracting individual b-value image volumes from such 
+more given b-value images (and possibly a given ADC) using one of four 
+different models. These include: mono exponential, intravoxel incoherent 
+motion (IVIM), diffusion  kurtosis (DK), and a combined DK and IVIM model. 
+It can read vendor-specific formatted diffusion b-values from DICOM and 
+can write b-value, Apparent Diffusion Coefficient (ADC), kurtosis, and 
+perfusion fraction images to medical image formats like MetaIO as well 
+as DICOM. As diffusion MRI sequences are often interleaves with b-values, 
+this tool supports extracting individual b-value image volumes from such 
 sequences!
+
+NOTE: The tool will automatically detect inverted b-value images and 
+restore the images prior to computing the target b-value image.
 
 NOTE: This tool is especially designed for prostate mpMRI imaging. 
 Model assumptions follow those in the following paper:
@@ -182,6 +185,8 @@ _Kurtosis appended.
 image format file.
 -p -- Save calculated perfusion fraction image. The output path will 
 have _Perfusion appended.
+-A -- Load an existing ADC image to use for computing a b-value image 
+(only supported by 'mono' model).
 
 #######################################################################
 # Models                                                              #

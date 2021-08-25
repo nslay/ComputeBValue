@@ -79,6 +79,7 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
+  std::cerr << "-A -- Load an existing ADC image to use for computing a b-value image (only supported by 'mono' model)." << std::endl;
   exit(1);
 }
 
@@ -97,6 +98,9 @@ std::map<double, std::vector<std::string>> ComputeBValueFileNames(const std::str
 template<typename PixelType>
 std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(const std::string &strPath, const std::string &strSeriesUID = std::string());
 
+template<typename PixelType>
+void Uninvert(itk::Image<PixelType, 3> *p_clBValueImage);
+
 class BValueModel : public vnl_cost_function {
 public:
   typedef BValueModel SelfType;
@@ -109,7 +113,7 @@ public:
   virtual std::string Name() const = 0;
 
   virtual bool Good() const { 
-    if (GetTargetBValue() < 0.0 || m_mImagesByBValue.size() < 2)
+    if (GetTargetBValue() < 0.0 || m_mImagesByBValue.empty())
       return false;
 
     auto itr = GetImages().begin();
@@ -160,6 +164,8 @@ public:
     return m_mImagesByBValue.size() > 0;
   }
   const ImageMapType & GetImages() const { return m_mImagesByBValue; }
+
+  virtual bool SetADCImage(ImageType *p_clRawADCImage) { return false; } // Option not supported by default
 
   void SetTargetBValue(double dTargetBValue) { m_dTargetBValue = dTargetBValue; }
   double GetTargetBValue() const { return m_dTargetBValue; }
@@ -244,6 +250,21 @@ public:
 
   virtual std::string Name() const override { return "Mono Exponential"; }
 
+  virtual bool Good() const override { 
+    if (!SuperType::Good())
+      return false;
+
+    if (!m_p_clRawADCImage)
+      return GetImages().size() > 1;
+
+    return m_p_clRawADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
+  }
+
+  virtual bool SetADCImage(ImageType *p_clRawADCImage) override {
+    m_p_clRawADCImage = p_clRawADCImage;
+    return true;
+  }
+
   virtual bool SaveADC() override { return m_bSaveADC = true; }
 
   virtual bool Run() override;
@@ -261,6 +282,7 @@ private:
   bool m_bSaveADC = false;
   ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
+  ImageType::Pointer m_p_clRawADCImage;
 };
 
 class IVIMModel : public BValueModel {
@@ -275,6 +297,10 @@ public:
   virtual ~IVIMModel() = default;
 
   virtual std::string Name() const override { return "IVIM"; }
+
+  virtual bool Good() const override { 
+    return GetImages().size() > 1 && SuperType::Good();
+  }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -312,6 +338,10 @@ public:
 
   virtual std::string Name() const override { return "DK"; }
 
+  virtual bool Good() const override { 
+    return GetImages().size() > 1 && SuperType::Good();
+  }
+
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SaveKurtosis() override { return m_bSaveKurtosis = true; }
 
@@ -347,6 +377,10 @@ public:
   virtual ~DKIVIMModel() = default;
 
   virtual std::string Name() const override { return "DK+IVIM"; }
+
+  virtual bool Good() const override { 
+    return GetImages().size() > 1 && SuperType::Good();
+  }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -387,10 +421,11 @@ int main(int argc, char **argv) {
 
   double dBValue = -1.0;
 
+  std::string strADCImagePath;
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:chkn:o:p")) != -1) {
+  while ((c = getopt(argc, argv, "ab:chkn:o:pA:")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
@@ -421,6 +456,9 @@ int main(int argc, char **argv) {
       break;
     case 'p':
       bSavePerfusion = true;
+      break;
+    case 'A':
+      strADCImagePath = optarg;
       break;
     case '?':
     default:
@@ -455,6 +493,24 @@ int main(int argc, char **argv) {
   }
 
   typedef itk::Image<short, 3> ImageType;
+
+  if (strADCImagePath.size() > 0) {
+    ImageType::Pointer p_clADCImage;
+    if (GetExtension(strADCImagePath).empty())
+      p_clADCImage = LoadDicomImage<ImageType::PixelType, 3>(strADCImagePath);
+    else
+      p_clADCImage = LoadImg<ImageType::PixelType, 3>(strADCImagePath);
+
+    if (!p_clADCImage) {
+      std::cerr << "Error: Could not load ADC image '" << strADCImagePath << "'." << std::endl;
+      return -1;
+    }
+
+    std::cout << "Info: Loaded ADC image." << std::endl;
+
+    if (!p_clModel->SetADCImage(p_clADCImage))
+      std::cerr << "Error: Warning: '" << strModel << "' model does not support using existing ADC image." << std::endl;
+  }
 
   std::map<double, ImageType::Pointer> mImagesByBValue;
 
@@ -861,7 +917,56 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
     mImagesByBValue[stBValueFilesPair.first] = p_clReader->GetOutput();
   }
 
+  // Try to "uninvert" ...
+  for (auto &stBValueImagePair : mImagesByBValue)
+    Uninvert(stBValueImagePair.second.GetPointer());
+
   return mImagesByBValue;
+}
+
+template<typename PixelType>
+void Uninvert(itk::Image<PixelType, 3> *p_clBValueImage) {
+  if (!p_clBValueImage)
+    return;
+
+  int iPixelRep = -1;
+  int iBitsStored = 0;
+
+  if (!ExposeStringMetaData(p_clBValueImage->GetMetaDataDictionary(), "0028|0103", iPixelRep) || !ExposeStringMetaData(p_clBValueImage->GetMetaDataDictionary(), "0028|0101", iBitsStored) || iBitsStored < 1)
+    return; // Not DICOM?
+
+  PixelType maxValue = std::numeric_limits<PixelType>::max();
+
+  switch (iPixelRep) {
+  case 0: // Unsigned
+    maxValue = PixelType((1U << iBitsStored) - 1);
+    break;
+  case 1: // Signed
+    maxValue = PixelType((1U << (iBitsStored-1)) - 1);
+    break;
+  default: // Uhh?
+    std::cerr << "Warning: Could not determine pixel representation." << std::endl;
+    return;
+  }
+
+  const PixelType halfValue = maxValue / 2;
+
+  // Determine if the Bvalue image is inverted by counting how many pixels are above half the range
+  size_t highCount = 0;
+  const size_t numPixels = p_clBValueImage->GetBufferedRegion().GetNumberOfPixels();
+
+  PixelType * const p_buffer = p_clBValueImage->GetBufferPointer();
+
+  for (size_t i = 0; i < numPixels; ++i)
+    highCount += (p_buffer[i] > halfValue ? 1 : 0);
+
+  // > 75%?
+  if (4*highCount > 3*numPixels) {
+    std::cout << "Info: B-value image appears inverted. Restoring (high = " << maxValue << ") ..." << std::endl;
+
+    for (size_t i = 0; i < numPixels; ++i)
+      p_buffer[i] = maxValue - p_buffer[i];
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -1143,6 +1248,9 @@ bool MonoExponentialModel::SaveImages() const {
 void MonoExponentialModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLoss(0.0);
 
+  if (m_p_clRawADCImage.IsNotNull()) // Use the existing ADC value if given
+    clD.SetConstant(clX[0]);
+
   for (auto &stPair : GetLogIntensities()) {      
     clLoss += pow(-stPair.first * clD - stPair.second, 2);
   }
@@ -1165,6 +1273,9 @@ double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
 
   clX[0] = 1.0;
   clX[1] = -1.0;
+
+  if (m_p_clRawADCImage.IsNotNull())
+    clX[0] = m_p_clRawADCImage->GetPixel(clIndex) / 1.0e6;
 
   if (!GetSolver().minimize(clX))
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
