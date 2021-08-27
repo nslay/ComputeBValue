@@ -79,7 +79,7 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
-  std::cerr << "-A -- Load an existing ADC image to use for computing a b-value image (only supported by 'mono' model)." << std::endl;
+  std::cerr << "-A -- Load an existing ADC image to use for computing a b-value image." << std::endl;
   exit(1);
 }
 
@@ -165,7 +165,9 @@ public:
   }
   const ImageMapType & GetImages() const { return m_mImagesByBValue; }
 
+  // These are for a given input ADC image (not computed one).
   virtual bool SetADCImage(ImageType *p_clRawADCImage) { return false; } // Option not supported by default
+  virtual ImageType::Pointer GetADCImage() const { return ImageType::Pointer(); } // Option not supported by default
 
   void SetTargetBValue(double dTargetBValue) { m_dTargetBValue = dTargetBValue; }
   double GetTargetBValue() const { return m_dTargetBValue; }
@@ -254,16 +256,18 @@ public:
     if (!SuperType::Good())
       return false;
 
-    if (!m_p_clRawADCImage)
+    if (!m_p_clInputADCImage)
       return GetImages().size() > 1;
 
-    return m_p_clRawADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
+    return m_p_clInputADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
   }
 
-  virtual bool SetADCImage(ImageType *p_clRawADCImage) override {
-    m_p_clRawADCImage = p_clRawADCImage;
+  virtual bool SetADCImage(ImageType *p_clInputADCImage) override {
+    m_p_clInputADCImage = p_clInputADCImage;
     return true;
   }
+
+  virtual ImageType::Pointer GetADCImage() const override { return m_p_clInputADCImage; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
 
@@ -282,7 +286,7 @@ private:
   bool m_bSaveADC = false;
   ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
-  ImageType::Pointer m_p_clRawADCImage;
+  ImageType::Pointer m_p_clInputADCImage;
 };
 
 class IVIMModel : public BValueModel {
@@ -299,8 +303,21 @@ public:
   virtual std::string Name() const override { return "IVIM"; }
 
   virtual bool Good() const override { 
-    return GetImages().size() > 1 && SuperType::Good();
+    if (!SuperType::Good())
+      return false;
+
+    if (!m_p_clInputADCImage)
+      return GetImages().size() > 1;
+
+    return m_p_clInputADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
   }
+
+  virtual bool SetADCImage(ImageType *p_clRawADCImage) override {
+    m_p_clInputADCImage = p_clRawADCImage;
+    return true;
+  }
+
+  virtual ImageType::Pointer GetADCImage() const override { return m_p_clInputADCImage; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -323,6 +340,7 @@ private:
   ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
+  ImageType::Pointer m_p_clInputADCImage;
 };
 
 class DKModel : public BValueModel {
@@ -339,8 +357,21 @@ public:
   virtual std::string Name() const override { return "DK"; }
 
   virtual bool Good() const override { 
-    return GetImages().size() > 1 && SuperType::Good();
+    if (!SuperType::Good())
+      return false;
+
+    if (!m_p_clInputADCImage)
+      return GetImages().size() > 1;
+
+    return m_p_clInputADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
   }
+
+  virtual bool SetADCImage(ImageType *p_clRawADCImage) override {
+    m_p_clInputADCImage = p_clRawADCImage;
+    return true;
+  }
+
+  virtual ImageType::Pointer GetADCImage() const override { return m_p_clInputADCImage; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SaveKurtosis() override { return m_bSaveKurtosis = true; }
@@ -363,6 +394,7 @@ private:
   ImageType::Pointer m_p_clTargetBValueImage; // In case we already have it
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
+  ImageType::Pointer m_p_clInputADCImage;
 };
 
 class DKIVIMModel : public BValueModel {
@@ -379,8 +411,21 @@ public:
   virtual std::string Name() const override { return "DK+IVIM"; }
 
   virtual bool Good() const override { 
-    return GetImages().size() > 1 && SuperType::Good();
+    if (!SuperType::Good())
+      return false;
+
+    if (!m_p_clInputADCImage)
+      return GetImages().size() > 1;
+
+    return m_p_clInputADCImage->GetBufferedRegion() == GetImages().begin()->second->GetBufferedRegion();
   }
+
+  virtual bool SetADCImage(ImageType *p_clRawADCImage) override {
+    m_p_clInputADCImage = p_clRawADCImage;
+    return true;
+  }
+
+  virtual ImageType::Pointer GetADCImage() const override { return m_p_clInputADCImage; }
 
   virtual bool SaveADC() override { return m_bSaveADC = true; }
   virtual bool SavePerfusion() override { return m_bSavePerfusion = true; }
@@ -407,6 +452,7 @@ private:
   FloatImageType::Pointer m_p_clADCImage;
   FloatImageType::Pointer m_p_clPerfusionImage;
   FloatImageType::Pointer m_p_clKurtosisImage;
+  ImageType::Pointer m_p_clInputADCImage;
 };
 
 int main(int argc, char **argv) {
@@ -960,10 +1006,11 @@ void Uninvert(itk::Image<PixelType, 3> *p_clBValueImage) {
   PixelType * const p_buffer = p_clBValueImage->GetBufferPointer();
 
   for (size_t i = 0; i < numPixels; ++i) {
-    if (p_buffer[i] < 0) // Not a b-value image
+    if (p_buffer[i] < 0 || p_buffer[i] > maxValue) // Not a b-value image or not "inverted" in the expected way
       return;
 
-    highCount += (p_buffer[i] > halfValue ? 1 : 0);
+    if (p_buffer[i] > halfValue)
+      ++highCount;
   }
 
   // > 75%?
@@ -1011,6 +1058,7 @@ bool BValueModel::ComputeB0Image() {
 
   clModel.SetImages(GetImages());
   clModel.SetTargetBValue(0.0);
+  clModel.SetADCImage(GetADCImage()); // Provide the input ADC (if given)
 
   std::cout << "Info: No b-0 image present. Precomputing b-0 image ..." << std::endl;
 
@@ -1099,7 +1147,7 @@ bool BValueModel::SaveADCImage(itk::Image<float, 3>::Pointer p_clADCImage, const
 
   std::transform(p_clADCImage->GetBufferPointer(), p_clADCImage->GetBufferPointer() + p_clADCImage->GetBufferedRegion().GetNumberOfPixels(), p_clIntADCImage->GetBufferPointer(),
     [](const float &fPixel) -> ImageType::PixelType {
-      return ImageType::PixelType(std::min(4095.0, std::max(0.0, std::round(1e6*fPixel))));
+      return ImageType::PixelType(std::min(4095.0, std::max(0.0, std::round(1.0e6*fPixel))));
     });
 
   return SaveImage<ImageType::PixelType>(p_clIntADCImage, strPath, iSeriesNumber, strSeriesDescription);
@@ -1254,7 +1302,7 @@ bool MonoExponentialModel::SaveImages() const {
 void MonoExponentialModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLoss(0.0);
 
-  if (m_p_clRawADCImage.IsNotNull()) // Use the existing ADC value if given
+  if (m_p_clInputADCImage.IsNotNull()) // Use the existing ADC value if given
     clD.SetConstant(clX[0]);
 
   for (auto &stPair : GetLogIntensities()) {      
@@ -1280,8 +1328,8 @@ double MonoExponentialModel::Solve(const itk::Index<3> &clIndex) {
   clX[0] = 1.0;
   clX[1] = -1.0;
 
-  if (m_p_clRawADCImage.IsNotNull())
-    clX[0] = m_p_clRawADCImage->GetPixel(clIndex) / 1.0e6;
+  if (m_p_clInputADCImage.IsNotNull())
+    clX[0] = m_p_clInputADCImage->GetPixel(clIndex) / 1.0e6;
 
   if (!GetSolver().minimize(clX))
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
@@ -1367,6 +1415,9 @@ bool IVIMModel::SaveImages() const {
 void IVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLogF(clX[2], 2), clLoss(0.0);
 
+  if (m_p_clInputADCImage.IsNotNull())
+    clD.SetConstant(clX[0]);
+
   for (auto &stPair : GetLogIntensities()) {      
     clLoss += pow(clLogF - stPair.first * clD - stPair.second, 2);
   }
@@ -1390,6 +1441,9 @@ double IVIMModel::Solve(const itk::Index<3> &clIndex) {
   clX[0] = 1.0;
   clX[1] = -1.0; // Log b-value
   clX[2] = -1.0; // Log perfusion fraction
+
+  if (m_p_clInputADCImage.IsNotNull())
+    clX[0] = m_p_clInputADCImage->GetPixel(clIndex) / 1.0e6;
 
   if (!GetSolver().minimize(clX))
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
@@ -1478,6 +1532,9 @@ bool DKModel::SaveImages() const {
 void DKModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clK(clX[2], 2), clLoss(0.0);
 
+  if (m_p_clInputADCImage.IsNotNull())
+    clD.SetConstant(clX[0]);
+
   for (auto &stPair : GetLogIntensities()) {
     ADVarType clBD = stPair.first * clD;
     clLoss += pow(-clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
@@ -1504,6 +1561,9 @@ double DKModel::Solve(const itk::Index<3> &clIndex) {
   clX[0] = 1.0; // ADC
   clX[1] = -1.0; // Log b-value
   clX[2] = 1e-3; // Kurtosis
+
+  if (m_p_clInputADCImage.IsNotNull())
+    clX[0] = m_p_clInputADCImage->GetPixel(clIndex) / 1.0e6;
 
   if (!GetSolver().minimize(clX))
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
@@ -1607,6 +1667,9 @@ bool DKIVIMModel::SaveImages() const {
 void DKIVIMModel::compute(const vnl_vector<double> &clX, double *p_dF, vnl_vector<double> *p_clG) {
   ADVarType clD(clX[0], 0), clLogS(clX[1], 1), clLogF(clX[2], 2), clK(clX[3], 3), clLoss(0.0);
 
+  if (m_p_clInputADCImage.IsNotNull())
+    clD.SetConstant(clX[0]);
+
   for (auto &stPair : GetLogIntensities()) {      
     ADVarType clBD = stPair.first * clD;
     clLoss += pow(clLogF - clBD - stPair.second + clK * clBD * clBD / 6.0, 2);
@@ -1634,6 +1697,9 @@ double DKIVIMModel::Solve(const itk::Index<3> &clIndex) {
   clX[1] = -1.0; // Log b-value
   clX[2] = -1.0; // Log perfusion fraction
   clX[3] = 1e-3; // Kurtosis
+
+  if (m_p_clInputADCImage.IsNotNull())
+    clX[0] = m_p_clInputADCImage->GetPixel(clIndex) / 1.0e6;
 
   if (!GetSolver().minimize(clX))
     std::cerr << "Warning: Solver failed at pixel: " << clIndex << std::endl;
