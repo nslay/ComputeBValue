@@ -69,7 +69,7 @@
 #include "vnl/algo/vnl_lbfgsb.h"
 
 void Usage(const char *p_cArg0) {
-  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] [-A ADCImageFolder|ADCImageFile] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]" << std::endl;
+  std::cerr << "Usage: " << p_cArg0 << " [-achkp] [-o outputPath] [-n seriesNumber] [-s BValueScaleFactor] [-A ADCImageFolder|ADCImageFile] -b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]" << std::endl;
   std::cerr << "\nOptions:" << std::endl;
   std::cerr << "-a -- Save calculated ADC. The output path will have _ADC appended (folder --> folder_ADC or file.ext --> file_ADC.ext)." << std::endl;
   std::cerr << "-b -- Target b-value to calculate." << std::endl;
@@ -79,6 +79,7 @@ void Usage(const char *p_cArg0) {
   std::cerr << "-n -- Series number for calculated b-value image (default 13701)." << std::endl;
   std::cerr << "-o -- Output path which may be a folder for DICOM output or a medical image format file." << std::endl;
   std::cerr << "-p -- Save calculated perfusion fraction image. The output path will have _Perfusion appended." << std::endl;
+  std::cerr << "-s -- Scale factor of target b-value image intensities (default 1.0)." << std::endl;
   std::cerr << "-A -- Load an existing ADC image to use for computing a b-value image." << std::endl;
   exit(1);
 }
@@ -172,6 +173,9 @@ public:
   void SetTargetBValue(double dTargetBValue) { m_dTargetBValue = dTargetBValue; }
   double GetTargetBValue() const { return m_dTargetBValue; }
 
+  void SetBValueScale(double dScale) { m_dScale = dScale; }
+  double GetBValueScale() const { return m_dScale; }
+
   void SetSeriesNumber(int iSeriesNumber) { m_iSeriesNumber = iSeriesNumber; }
   int GetSeriesNumber() const { return m_iSeriesNumber; }
 
@@ -237,6 +241,7 @@ private:
   std::vector<std::pair<double, double>> m_vBValueAndLogIntensity;
   int m_iSeriesNumber = 13701;
   bool m_bCompress = false;
+  double m_dScale = 1.0;
 };
 
 class MonoExponentialModel : public BValueModel {
@@ -466,18 +471,20 @@ int main(int argc, char **argv) {
   double dLambda = 0.0;
 
   double dBValue = -1.0;
+  double dBValueScale = 1.0;
 
   std::string strADCImagePath;
   std::string strOutputPath = "output.mha";
 
   int c = 0;
-  while ((c = getopt(argc, argv, "ab:chkn:o:pA:")) != -1) {
+  while ((c = getopt(argc, argv, "ab:chkn:o:ps:A:")) != -1) {
     switch (c) {
     case 'a':
       bSaveADC = true;
       break;
     case 'b':
       dBValue = FromString<double>(optarg, -1.0);
+
       if (dBValue < 0.0)
         Usage(p_cArg0);
       break;
@@ -502,6 +509,12 @@ int main(int argc, char **argv) {
       break;
     case 'p':
       bSavePerfusion = true;
+      break;
+    case 's':
+        dBValueScale = FromString<double>(optarg, -1.0);
+
+        if (dBValueScale <= 0.0)
+          Usage(p_cArg0);
       break;
     case 'A':
       strADCImagePath = optarg;
@@ -579,6 +592,7 @@ int main(int argc, char **argv) {
   p_clModel->SetOutputPath(strOutputPath);
   p_clModel->SetSeriesNumber(iSeriesNumber);
   p_clModel->SetCompress(bCompress);
+  p_clModel->SetBValueScale(dBValueScale);
 
   if (bSaveADC && !p_clModel->SaveADC())
     std::cerr << "Warning: '" << strModel << "' model does not support saving ADC images." << std::endl;
@@ -1224,7 +1238,7 @@ bool BValueModel::Run() {
         if (!SetLogIntensities(clIndex))
           continue;
 
-        const double dBN = std::min(4095.0, std::max(0.0, Solve(clIndex)));
+        const double dBN = std::min(4095.0, std::max(0.0, GetBValueScale()*Solve(clIndex)));
 
         m_p_clBValueImage->SetPixel(clIndex, ImageType::PixelType(std::round(dBN)));
       }

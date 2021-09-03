@@ -168,9 +168,9 @@ Lastly, ComputeBValue provides the below usage message when
 provided with the -h flag or no arguments. It's useful if you
 forget.
 
-Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] [-A ADCImageFolder|ADCImageFile]
--b targetBValue mono|ivim|dk|dkivim diffusionFolder1|diffusionFile1[:bvalue] 
-[diffusionFolder2|diffusionFile2[:bvalue] ...]
+Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] [-s BValueScaleFactor] 
+[-A ADCImageFolder|ADCImageFile] -b targetBValue mono|ivim|dk|dkivim 
+diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]
 
 Options:
 -a -- Save calculated ADC. The output path will have _ADC appended 
@@ -185,6 +185,7 @@ _Kurtosis appended.
 image format file.
 -p -- Save calculated perfusion fraction image. The output path will 
 have _Perfusion appended.
+-s -- Scale factor of target b-value image intensities (default 1.0).
 -A -- Load an existing ADC image to use for computing a b-value image.
 
 #######################################################################
