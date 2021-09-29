@@ -49,11 +49,17 @@ more given b-value images (and optionally a given ADC image) using one of
 four different models. These include: mono exponential, intravoxel 
 incoherent motion (IVIM), diffusion  kurtosis (DK), and a combined DK and 
 IVIM model. It can read vendor-specific formatted diffusion b-values from 
-DICOM and can write b-value, Apparent Diffusion Coefficient (ADC), 
-kurtosis, and perfusion fraction images to medical image formats like 
-MetaIO, NIFTI, as well as DICOM. As diffusion MRI sequences are often 
-interleaves with b-values, this tool supports extracting individual 
-b-value image volumes from such sequences!
+DICOM, solve for unknown b-values, and can write b-value, Apparent 
+Diffusion Coefficient (ADC), kurtosis, and perfusion fraction images to 
+medical image formats like MetaIO, NIFTI, as well as DICOM. As diffusion 
+MRI sequences are often interleaves with b-values, this tool supports 
+extracting individual b-value image volumes from such sequences! When the
+the tool cannot determine b-value from DICOM, it will attempt to solve 
+for the unknown b-values (you must have ADC and know the initial b-value 
+used, e.g. b=0).
+
+NOTE: Solving for unknown b-values is currently only supported for diffusion 
+DICOM series comprised of mixed b-values.
 
 NOTE: The tool will automatically detect inverted b-value images and 
 restore the images prior to computing the target b-value image.
@@ -169,7 +175,7 @@ provided with the -h flag or no arguments. It's useful if you
 forget.
 
 Usage: ComputeBValue [-achkp] [-o outputPath] [-n seriesNumber] [-s BValueScaleFactor] 
-[-A ADCImageFolder|ADCImageFile] -b targetBValue mono|ivim|dk|dkivim 
+[-A ADCImageFolder|ADCImageFile] [-I initialBValue] -b targetBValue mono|ivim|dk|dkivim 
 diffusionFolder1|diffusionFile1[:bvalue] [diffusionFolder2|diffusionFile2[:bvalue] ...]
 
 Options:
@@ -187,6 +193,7 @@ image format file.
 have _Perfusion appended.
 -s -- Scale factor of target b-value image intensities (default 1.0).
 -A -- Load an existing ADC image to use for computing a b-value image.
+-I -- Initial expected b-value in a diffusion series of unknown b-values (default 0).
 
 #######################################################################
 # Models                                                              #
