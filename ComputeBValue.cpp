@@ -965,11 +965,6 @@ std::vector<std::vector<std::string>> ComputeUnknownBValueFileNames(const std::s
 
     Trim(strTmpSeriesUID);
 
-    if (GetDiffusionBValue(p_clImageIO->GetMetaDataDictionary()) < 0.0) {
-      std::cerr << "Error: Image does not appear to be a diffusion image." << std::endl;
-      return std::vector<std::vector<std::string>>();
-    }
-
     return ComputeUnknownBValueFileNames(DirName(strPath), strTmpSeriesUID);
   }
 
