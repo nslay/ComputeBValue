@@ -96,17 +96,16 @@ double GetDiffusionBValueGE(const itk::MetaDataDictionary &clDicomTags);
 double GetDiffusionBValueProstateX(const itk::MetaDataDictionary &clDicomTags); // Same as Skyra and Verio (and many others I can't remember)
 double GetDiffusionBValuePhilips(const itk::MetaDataDictionary &clDicomTags);
 
-
 std::map<double, std::vector<std::string>> ComputeBValueFileNames(const std::string &strPath, const std::string &strSeriesUID = std::string());
 
 // BValue files but with unknown bvalues!
 std::vector<std::vector<std::string>> ComputeUnknownBValueFileNames(const std::string &strPath, const std::string &strSeriesUID = std::string());
 
 template<typename PixelType>
-std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(const std::string &strPath, const std::string &strSeriesUID = std::string());
+std::vector<typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(const std::string &strPath, const std::string &strSeriesUID = std::string());
 
 template<typename PixelType>
-std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadAndSolveForBValueImages(const std::string &strPath, itk::Image<short, 3>::Pointer p_clADCImage, double dInitialBValue = 0.0, const std::string &strSeriesUID = std::string());
+std::map<double, typename itk::Image<PixelType, 3>::Pointer> ResolveBValueImages(std::vector<typename itk::Image<PixelType, 3>::Pointer> &vImages, itk::Image<short, 3>::Pointer p_clADCImage, double dInitialBValue = 0.0);
 
 template<typename PixelType>
 void Uninvert(itk::Image<PixelType, 3> *p_clBValueImage);
@@ -588,27 +587,18 @@ int main(int argc, char **argv) {
       std::cerr << "Warning: '" << strModel << "' model does not support using existing ADC image." << std::endl;
   }
 
-  std::map<double, ImageType::Pointer> mImagesByBValue;
+  std::vector<ImageType::Pointer> vImages;
 
   for (int i = 1; i < argc; ++i) {
-    std::map<double, ImageType::Pointer> mTmp = LoadBValueImages<ImageType::PixelType>(argv[i]);
+    std::vector<ImageType::Pointer> vTmp = LoadBValueImages<ImageType::PixelType>(argv[i]);
 
-    // Try to solve for unknown b-values?
-    if (mTmp.empty() && p_clADCImage.IsNotNull()) {
-      std::cout << "Info: Trying to infer unknown b-values (initial b = " << dInitialBValue << ") ..." << std::endl;
-      mTmp = LoadAndSolveForBValueImages<ImageType::PixelType>(argv[i], p_clADCImage, dInitialBValue);
-    }
-
-    for (const auto &stPair : mTmp) {
-      std::cout << "Info: Loaded b = " << stPair.first << std::endl;
-      //SaveImg<short, 3>(stPair.second, "b" + std::to_string(stPair.first) + ".mha");
-
-      if (!mImagesByBValue.emplace(stPair).second) {
-        std::cerr << "Error: Duplicate b-value " << stPair.first << " from series '" << argv[i] << "'." << std::endl;
-        return -1;
-      }
-    }
+    vImages.insert(vImages.end(), vTmp.begin(), vTmp.end());
   }
+
+  std::map<double, ImageType::Pointer> mImagesByBValue = ResolveBValueImages<ImageType::PixelType>(vImages, p_clADCImage, dInitialBValue);
+
+  for (const auto &stPair : mImagesByBValue)
+    std::cout << "Info: Loaded b = " << stPair.first << std::endl;
 
   p_clModel->SetTargetBValue(dBValue);
   p_clModel->SetImages(mImagesByBValue);
@@ -1101,10 +1091,10 @@ std::vector<std::vector<std::string>> ComputeUnknownBValueFileNames(const std::s
 }
 
 template<typename PixelType>
-std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(const std::string &strPath, const std::string &strSeriesUID) {
+std::vector<typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(const std::string &strPath, const std::string &strSeriesUID) {
   typedef itk::GDCMImageIO ImageIOType;
   typedef itk::Image<PixelType, 3> ImageType;
-  typedef std::map<double, typename ImageType::Pointer> MapType;
+  typedef std::vector<typename ImageType::Pointer> VectorType;
   typedef itk::ImageSeriesReader<ImageType> ReaderType;
 
   auto stPathBValuePair = GetBValueHint(strPath);
@@ -1122,7 +1112,7 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
 
     if (!p_clImage) {
       std::cerr << "Error: Could not load '" << strHintPath << "' (hinted b = " << dHintBValue << ")." << std::endl;
-      return MapType();
+      return VectorType();
     }
 
     // Override the BValue
@@ -1130,188 +1120,311 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadBValueImages(co
 
     Uninvert(p_clImage.GetPointer()); // Try to "uninvert" this (nothing will happen if DICOM tags are missing).
 
-    MapType mImagesByBValue;
-    mImagesByBValue.emplace(dHintBValue, p_clImage);
+    VectorType vImages;
+    vImages.emplace_back(p_clImage);
 
-    return mImagesByBValue;
+    return vImages;
+  }
+
+  if (!IsFolder(strPath) && GetExtension(strPath) != ".dcm") {
+    typename ImageType::Pointer p_clImage = LoadImg<PixelType, 3>(strPath);
+
+    if (!p_clImage) {
+      std::cerr << "Error: Could not load '" << strPath << "'." << std::endl;
+      return VectorType();
+    }
+
+    Uninvert(p_clImage.GetPointer()); // Try to "uninvert" this (nothing will happen if DICOM tags are missing).
+
+    VectorType vImages;
+    vImages.emplace_back(p_clImage);
+
+    return vImages;
   }
 
   auto mFilesByBValue = ComputeBValueFileNames(strPath, strSeriesUID);
 
-  if (mFilesByBValue.empty())
-    return MapType();
-
   ImageIOType::Pointer p_clImageIO = ImageIOType::New();
 
   p_clImageIO->LoadPrivateTagsOn();
   p_clImageIO->KeepOriginalUIDOn();
 
-  MapType mImagesByBValue;
+  if (mFilesByBValue.size() > 0) {
+    VectorType vImages;
 
-  for (const auto &stBValueFilesPair : mFilesByBValue) {
-    typename ReaderType::Pointer p_clReader = ReaderType::New();
+    for (const auto &stBValueFilesPair : mFilesByBValue) {
+      typename ReaderType::Pointer p_clReader = ReaderType::New();
 
-    p_clReader->SetImageIO(p_clImageIO);
-    p_clReader->SetFileNames(stBValueFilesPair.second);
+      p_clReader->SetImageIO(p_clImageIO);
+      p_clReader->SetFileNames(stBValueFilesPair.second);
 
-    try {
-      p_clReader->Update();
+      try {
+        p_clReader->Update();
+      }
+      catch (itk::ExceptionObject &e) {
+        std::cerr << "Error: " << e << std::endl;
+        return VectorType();
+      }
+
+      typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
+      p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
+
+      EncapsulateStringMetaData(p_clImage->GetMetaDataDictionary(), "0018|9087", stBValueFilesPair.first);
+
+      vImages.emplace_back(p_clImage);
     }
-    catch (itk::ExceptionObject &e) {
-      std::cerr << "Error: " << e << std::endl;
-      return MapType();
-    }
 
-    typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
-    p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
+    // Try to "uninvert" ...
+    for (auto &p_clImage : vImages)
+      Uninvert(p_clImage.GetPointer());
 
-    mImagesByBValue[stBValueFilesPair.first] = p_clReader->GetOutput();
+    return vImages;
   }
 
-  // Try to "uninvert" ...
-  for (auto &stBValueImagePair : mImagesByBValue)
-    Uninvert(stBValueImagePair.second.GetPointer());
+  auto vFilesSortedByBValue = ComputeUnknownBValueFileNames(strPath, strSeriesUID);
 
-  return mImagesByBValue;
+  if (vFilesSortedByBValue.size() > 0) {
+    VectorType vImages;
+
+    for (const auto &vImageFiles : vFilesSortedByBValue) {
+      typename ReaderType::Pointer p_clReader = ReaderType::New();
+
+      p_clReader->SetImageIO(p_clImageIO);
+      p_clReader->SetFileNames(vImageFiles);
+
+      try {
+        p_clReader->Update();
+      }
+      catch (itk::ExceptionObject &e) {
+        std::cerr << "Error: " << e << std::endl;
+        return VectorType();
+      }
+
+      typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
+      p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
+
+      vImages.emplace_back(p_clImage);
+    }
+
+    // Try to "uninvert" ...
+    for (auto &p_clImage : vImages)
+      Uninvert(p_clImage.GetPointer());
+
+    return vImages;
+  }
+
+  return VectorType();
 }
 
 template<typename PixelType>
-std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadAndSolveForBValueImages(const std::string &strPath, itk::Image<short, 3>::Pointer p_clADCImage, double dInitialBValue, const std::string &strSeriesUID) {
+std::map<double, typename itk::Image<PixelType, 3>::Pointer> ResolveBValueImages(std::vector<typename itk::Image<PixelType, 3>::Pointer> &vImages, itk::Image<short, 3>::Pointer p_clADCImage, double dInitialBValue) {
   typedef itk::GDCMImageIO ImageIOType;
   typedef itk::Image<PixelType, 3> ImageType;
   typedef std::map<double, typename ImageType::Pointer> MapType;
   typedef itk::ImageSeriesReader<ImageType> ReaderType;
- 
-  if (!p_clADCImage || dInitialBValue < 0.0) // Need ADC image...
+
+  if (vImages.empty())
     return MapType();
 
-  auto vFilesSortedByBValue = ComputeUnknownBValueFileNames(strPath, strSeriesUID);
+  // First check if all images have b-values before doing more expensive computation
+  if (std::all_of(vImages.begin(), vImages.end(), 
+    [](const typename ImageType::Pointer &p_clImage) -> bool {
+      return p_clImage->GetMetaDataDictionary().HasKey("0018|9087");
+    })) {
 
-  if (vFilesSortedByBValue.size() < 2) {
+    MapType mImagesByBValue;
+
+    for (auto &p_clImage : vImages) {
+      double dBValue = -1.0;
+      if (!ExposeStringMetaData(p_clImage->GetMetaDataDictionary(), "0018|9087", dBValue)) {
+        // This should not happen
+        std::cerr << "Error: Could not extract b-value from image." << std::endl;
+        return MapType();
+      }
+
+      if (dBValue < 0.0) {
+        std::cerr << "Error: Extracted invalid b-value (b = " << dBValue << ")." << std::endl;
+        return MapType();
+      }
+
+      if (!mImagesByBValue.emplace(dBValue, p_clImage).second) {
+        std::cerr << "Error: Duplicate b-value (b = " << dBValue << ")." << std::endl;
+        return MapType();
+      }
+    }
+
+    return mImagesByBValue;
+  }
+
+  // Some images have unknown b-values... so solve for those using known information
+  std::cout << "Info: Trying to infer unknown b-values (initial b = " << dInitialBValue << ") ..." << std::endl;
+
+  if (vImages.size() < 2) {
     std::cerr << "Error: Need at least two b-value images." << std::endl;
     return MapType();
   }
 
-  ImageIOType::Pointer p_clImageIO = ImageIOType::New();
-
-  p_clImageIO->LoadPrivateTagsOn();
-  p_clImageIO->KeepOriginalUIDOn();
-
-  std::vector<typename ImageType::Pointer> vImages;
-
-  for (const std::vector<std::string> &vFiles : vFilesSortedByBValue) {
-    typename ReaderType::Pointer p_clReader = ReaderType::New();
-
-    p_clReader->SetImageIO(p_clImageIO);
-    p_clReader->SetFileNames(vFiles);
-
-    try {
-      p_clReader->Update();
-    }
-    catch (itk::ExceptionObject &e) {
-      std::cerr << "Error: " << e << std::endl;
-      return MapType();
-    }
-
-    typename ImageType::Pointer p_clImage = p_clReader->GetOutput();
-    p_clImage->SetMetaDataDictionary(*(p_clReader->GetMetaDataDictionaryArray()->at(0)));
-
-    if (p_clImage->GetBufferedRegion() != p_clADCImage->GetBufferedRegion()) {
-      std::cerr << "Error: Dimension mismatch between unknown b-value image and ADC." << std::endl;
-      return MapType();
-    }
-
-    vImages.push_back(p_clReader->GetOutput());
+  if (!p_clADCImage) {
+    std::cerr << "Error: Need ADC image to infer unknown b-values." << std::endl;
+    return MapType();
   }
 
-  // Try to "uninvert" ...
-  for (auto &p_clImage : vImages)
-    Uninvert(p_clImage.GetPointer());
+  if (std::any_of(vImages.begin(), vImages.end(),
+    [&p_clADCImage](const auto &p_clImage) -> bool {
+      return p_clADCImage->GetBufferedRegion() != p_clImage->GetBufferedRegion();   
+    })) {
 
-  MapType mImagesByBValue;
+    std::cerr << "Error: Dimension mismatch between unknown b-value image and ADC." << std::endl;
+    return MapType();
+  }
 
-  EncapsulateStringMetaData(vImages[0]->GetMetaDataDictionary(), "0018|9087", dInitialBValue);
+  // Sort the images by intensity (implicitly sorts by b-value)
+  {
+    std::vector<PixelType> vBuffer;
 
-  mImagesByBValue.emplace(dInitialBValue, vImages[0]);
+    auto fnCompareByPercentile = [&vBuffer](const typename ImageType::Pointer &a, const typename ImageType::Pointer &b) -> bool {
+      constexpr double dPerc = 0.9;
+      const size_t numPixels = a->GetBufferedRegion().GetNumberOfPixels();
 
-  const size_t numPixels = p_clADCImage->GetBufferedRegion().GetNumberOfPixels();
+      vBuffer.assign(a->GetBufferPointer(), a->GetBufferPointer() + numPixels);
 
-  vnl_matrix<double> clM(((vImages.size()-1)*vImages.size())/2, vImages.size()-1);
+      auto midItr = vBuffer.begin() + (size_t)(dPerc*vBuffer.size());
 
-  { 
-    clM.fill(0.0);
+      std::nth_element(vBuffer.begin(), midItr, vBuffer.end());
 
-    size_t i = 0;
-    for (i = 0; i < vImages.size()-1; ++i) {
-      clM(i,i) = 1.0;
-    }
+      const PixelType valueA = *midItr;
 
-    for (size_t j = 0; j < vImages.size()-1; ++j) {
-      for (size_t k = j+1; k < vImages.size()-1; ++k, ++i) {
-        clM(i,j) = -1.0;
-        clM(i,k) = 1.0;
+      vBuffer.assign(b->GetBufferPointer(), b->GetBufferPointer() + numPixels);
+
+      midItr = vBuffer.begin() + (size_t)(dPerc*vBuffer.size());
+
+      std::nth_element(vBuffer.begin(), midItr, vBuffer.end());
+
+      const PixelType valueB = *midItr;
+
+      return valueA > valueB;
+    };
+
+    std::sort(vImages.begin(), vImages.end(), fnCompareByPercentile);
+
+    // Check that known b-value images are still sorted correctly
+    double dPreviousBValue = -1.0;
+    for (const auto &p_clImage : vImages) {
+      double dBValue = -1.0;
+
+      if (ExposeStringMetaData(p_clImage->GetMetaDataDictionary(), "0018|9087", dBValue)) {
+        if (dBValue < dPreviousBValue) {
+          std::cerr << "Error: Known b-value image intensities are not consistent with b-value ordering." << std::endl;
+          return MapType();
+        }
+
+        dPreviousBValue = dBValue;
       }
     }
   }
+
+  // Recalculate the initial b-value if the first image has a b-value
+  {
+    double dBValue = -1.0;
+    if (ExposeStringMetaData(vImages[0]->GetMetaDataDictionary(), "0018|9087", dBValue) && dBValue >= 0.0) {
+      dInitialBValue = dBValue;
+    }
+    else {
+      EncapsulateStringMetaData(vImages[0]->GetMetaDataDictionary(), "0018|9087", dInitialBValue);
+    }
+
+    std::cout << "Info: Initial b-value is b = " << dInitialBValue << '.' << std::endl;
+  }
+
+  // Compute column index mapping for unknowns
+
+  // Image index --> column index
+  std::unordered_map<size_t, size_t> mUnknownIndices;
+
+  for (size_t i = 0; i < vImages.size(); ++i) {
+    if (!vImages[i]->GetMetaDataDictionary().HasKey("0018|9087")) {
+      const size_t j = mUnknownIndices.size();
+      mUnknownIndices.emplace(i, j);
+    }
+  }
+
+  // The first b-value image is assumed known and this may have been the only otherwise unknown b-value
+  if (mUnknownIndices.empty())
+    return ResolveBValueImages<PixelType>(vImages, p_clADCImage, dInitialBValue); // This will simply map the images since they're all known
+
+  const size_t numUnknowns = mUnknownIndices.size();
+  const size_t numKnowns = vImages.size() - numUnknowns;
+
+  vnl_matrix<double> clM(numUnknowns*numKnowns + numUnknowns*(numUnknowns-1)/2, numUnknowns);
+  clM.fill(0.0);
+
+  // Form the system
+  {
+    size_t r = 0;
+    for (size_t i = 0; i < vImages.size(); ++i) {
+      const auto itrI = mUnknownIndices.find(i);
+
+      for (size_t j = i+1; j < vImages.size(); ++j) {
+        const auto itrJ = mUnknownIndices.find(j);
+
+        if (itrI == mUnknownIndices.end() && itrJ == mUnknownIndices.end())
+          continue; // Both known, no equation to solve
+
+        if (itrI != mUnknownIndices.end())
+          clM(r, itrI->second) = -1.0;
+
+        if (itrJ != mUnknownIndices.end())
+          clM(r, itrJ->second) = 1.0;
+
+        ++r;
+      }
+    }
+  } // end scope
 
   vnl_vector<double> clLogS(clM.rows());
+  clLogS.fill(0.0);
 
+  // Form the RHS
   {
-    size_t i = 0;
-    clLogS.fill(0.0);
+    const size_t numPixels = p_clADCImage->GetBufferedRegion().GetNumberOfPixels();
+    const short * const p_sBufferADC = p_clADCImage->GetBufferPointer();
 
-    for (size_t j = 1; j < vImages.size(); ++j, ++i) {
-      typename ImageType::Pointer &p_clB0 = vImages[0];
-      typename ImageType::Pointer &p_clBN = vImages[j];
+    size_t r = 0;
+    for (size_t i = 0; i < vImages.size(); ++i) {
+      const auto itrI = mUnknownIndices.find(i);
 
-      const typename ImageType::PixelType * const p_bufferB0 = p_clB0->GetBufferPointer();
-      const typename ImageType::PixelType * const p_bufferBN = p_clBN->GetBufferPointer();
-      const short * const p_sBufferADC = p_clADCImage->GetBufferPointer();
+      typename ImageType::Pointer &p_clBI = vImages[i];
+      const PixelType * const p_bufferBI = p_clBI->GetBufferPointer();
 
-      double dLogMean = 0.0;
-      double dADCMean2 = 0.0;
-      size_t count = 0;
+      double dBValueI = 0.0;
+      if (!ExposeStringMetaData(p_clBI->GetMetaDataDictionary(), "0018|9087", dBValueI))
+        dBValueI = 0.0;
 
-      for (size_t k = 0; k < numPixels; ++k) {
-        if (p_sBufferADC[k] > 0 && p_bufferBN[k] > 0 && p_bufferB0[k] > p_bufferBN[k]) {
-          const double dADCValue = p_sBufferADC[k]/1.0e6;
-          const double dLogValue = dADCValue*(-dADCValue*dInitialBValue + std::log(p_bufferBN[k]/(double)p_bufferB0[k]));
+      for (size_t j = i+1; j < vImages.size(); ++j) {
+        const auto itrJ = mUnknownIndices.find(j);
 
-          ++count;
-          double dDelta = dLogValue - dLogMean;
-          dLogMean += dDelta / count;
+        if (itrI == mUnknownIndices.end() && itrJ == mUnknownIndices.end())
+          continue; // Both known, no equation to solve
 
-          dDelta = dADCValue*dADCValue - dADCMean2;
-          dADCMean2 += dDelta / count;
-        }
-      }
+        typename ImageType::Pointer &p_clBJ = vImages[j];
+        const typename ImageType::PixelType * const p_bufferBJ = p_clBJ->GetBufferPointer();
 
-      if (count == 0) {
-        std::cerr << "Error: Not enough valid voxels to solve for unknown b-value." << std::endl;
-        return MapType();
-      }
-
-      clLogS[i] = -dLogMean/dADCMean2;
-    }
-
-    for (size_t j = 1; j < vImages.size(); ++j) {
-      typename ImageType::Pointer &p_clB0 = vImages[j]; // Not really B0...
-      const typename ImageType::PixelType * const p_bufferB0 = p_clB0->GetBufferPointer();
-
-      for (size_t k = j+1; k < vImages.size(); ++k, ++i) {
-        typename ImageType::Pointer &p_clBN = vImages[k];
-
-        const typename ImageType::PixelType * const p_bufferBN = p_clBN->GetBufferPointer();
-        const short * const p_sBufferADC = p_clADCImage->GetBufferPointer();
+        double dBValueJ = 0.0;
+        if (!ExposeStringMetaData(p_clBJ->GetMetaDataDictionary(), "0018|9087", dBValueJ))
+          dBValueJ = 0.0;
 
         double dLogMean = 0.0;
         double dADCMean2 = 0.0;
         size_t count = 0;
 
-        for (size_t l = 0; l < numPixels; ++l) {
-          if (p_sBufferADC[l] > 0 && p_bufferBN[l] > 0 && p_bufferB0[l] > p_bufferBN[l]) {
-            const double dADCValue = p_sBufferADC[l]/1.0e6;
-            const double dLogValue = dADCValue*std::log(p_bufferBN[l]/(double)p_bufferB0[l]);
+        for (size_t k = 0; k < numPixels; ++k) {
+          // XXX: Somehow this commented condition can bias the solution
+          //if (p_sBufferADC[k] > 0 && p_bufferBJ[k] > 0 && p_bufferBI[k] >= p_bufferBJ[k]) {
+          if (p_sBufferADC[k] > 0 && p_bufferBJ[k] > 0 && p_bufferBI[k] > 0) {
+            const double dADCValue = p_sBufferADC[k]/1.0e6;
+            const double dLogValue = dADCValue*(dADCValue*(dBValueI - dBValueJ) - std::log(p_bufferBJ[k]/(double)p_bufferBI[k]));
+
+            // NOTE: dBValueI and dBValueJ are each 0.0 if they are unknown
 
             ++count;
             double dDelta = dLogValue - dLogMean;
@@ -1327,7 +1440,9 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadAndSolveForBVal
           return MapType();
         }
 
-        clLogS[i] = -dLogMean/dADCMean2;
+        clLogS[r] = dLogMean / dADCMean2;
+
+        ++r;
       }
     }
   } // end scope
@@ -1338,8 +1453,17 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadAndSolveForBVal
   vnl_cholesky clSolver(clM, vnl_cholesky::quiet);
   vnl_vector<double> clB = clSolver.solve(clLogS);
 
-  for (size_t i = 1; i < vImages.size(); ++i) {
-    const double dBValue = clB[i-1];
+  MapType mImagesByBValue;
+
+  for (size_t i = 0; i < vImages.size(); ++i) {
+    double dBValue = -1.0;
+
+    auto itr = mUnknownIndices.find(i);
+
+    if (itr != mUnknownIndices.end())
+      dBValue = clB[itr->second];
+    else
+      ExposeStringMetaData(vImages[i]->GetMetaDataDictionary(), "0018|9087", dBValue);
 
     if (dBValue < dInitialBValue) {
       std::cerr << "Error: Unexpected solution for unknown b-value: b = " << dBValue << std::endl;
@@ -1349,7 +1473,7 @@ std::map<double, typename itk::Image<PixelType, 3>::Pointer> LoadAndSolveForBVal
     EncapsulateStringMetaData(vImages[i]->GetMetaDataDictionary(), "0018|9087", dBValue);
 
     if (!mImagesByBValue.emplace(dBValue, vImages[i]).second) {
-      std::cerr << "Error: Duplicate solved b-value " << dBValue << " from series '" << strPath << "'." << std::endl;
+      std::cerr << "Error: Duplicate solved b-value " << dBValue << '.' << std::endl;
       return MapType();
     }
   }

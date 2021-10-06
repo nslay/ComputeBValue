@@ -58,9 +58,6 @@ the tool cannot determine b-value from DICOM, it will attempt to solve
 for the unknown b-values (you must have ADC and know the initial b-value 
 used, e.g. b=0).
 
-NOTE: Solving for unknown b-values is currently only supported for diffusion 
-DICOM series comprised of mixed b-values.
-
 NOTE: The tool will automatically detect inverted b-value images and 
 restore the images prior to computing the target b-value image.
 
